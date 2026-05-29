@@ -1,0 +1,9 @@
+name: packaging-metadata
+version: 1.0.0
+summary: Metadata for Mechanix Notes app packaging
+applications:
+  - name: notes
+    folder: .
+    binary: mechanix_notes
+    description: "A Flutter-based notes app to create, edit, and organize your ideas effortlessly."
+    maintainer: "Dhanish Patel <dhanishp@mechasystems.com>"
