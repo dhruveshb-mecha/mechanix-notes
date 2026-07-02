@@ -73,6 +73,7 @@ jobs:
           fi
 
           echo "/opt/flutter-elinux/bin" >> $GITHUB_PATH
+          echo "/opt/flutter-elinux/flutter/bin" >> $GITHUB_PATH
 
       - name: Build notes
         run: |
