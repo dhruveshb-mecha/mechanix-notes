@@ -25,6 +25,7 @@ class HomeNoteCardContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
+      splashFactory: NoSplash.splashFactory,
       mouseCursor: SystemMouseCursors.click,
       onLongPress: isSelectionMode ? null : onLongPress,
       onTap: onTap,

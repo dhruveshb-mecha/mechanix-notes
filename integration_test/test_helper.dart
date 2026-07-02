@@ -1,35 +1,27 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:mechanix_notes/core/utils/icons.dart';
-import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_button.dart';
 import 'package:flutter_quill/flutter_quill.dart' show QuillEditor;
+import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
+import 'package:mechanix_notes/features/notes/data/repository/note_repository_impl.dart';
 
 class IntegrationTestHelper {
-  String? tempPath;
+  NoteRepository? noteRepository;
 
   Future<void> setUp() async {
-    try {
-      if (!Hive.isAdapterRegistered(0)) {
-        Hive.registerAdapter(NoteModelAdapter());
-      }
-    } catch (_) {}
-
-    final directory = await Directory.systemTemp.createTemp(
-      'mechanix_notes_test_',
-    );
-    tempPath = directory.path;
-    Hive.init(tempPath);
+    noteRepository = NoteRepositoryImpl();
   }
 
   Future<void> tearDown() async {
-    if (tempPath != null) {
-      final directory = Directory(tempPath!);
-      if (await directory.exists()) {
-        await directory.delete(recursive: true);
-      }
+    if (noteRepository != null) {
+      try {
+        final notes = await noteRepository!.getNotes(0, 1000);
+        if (notes.isNotEmpty) {
+          await noteRepository!.deleteNotes(notes.map((n) => n.id).toList());
+        }
+      } catch (_) {}
     }
   }
 

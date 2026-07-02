@@ -7,6 +7,7 @@ import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
+import 'package:objectbox/objectbox.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -708,6 +709,37 @@ void main() {
           (s) => s.error,
           'error',
           ErrorCategory.failedToSaveNote,
+        ),
+      ],
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'emits EditorFailure(storageFull) when upsertNote throws DbFullException',
+      build: buildBloc,
+      setUp: () {
+        when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
+        when(
+          () => repository.upsertNote(any()),
+        ).thenThrow(DbFullException('DB full', 1018));
+      },
+      seed: () => EditorLoaded(
+        noteId: kTestNoteId,
+        title: kTestTitle,
+        quillDocument: Document(),
+        isNewNote: true,
+      ),
+      act: (bloc) => bloc.add(
+        EditorSaveRequested(
+          content: jsonDecode(kSomeDelta),
+          plainText: kSomePlainText,
+        ),
+      ),
+      expect: () => [
+        isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
+        isA<EditorFailure>().having(
+          (s) => s.error,
+          'error',
+          ErrorCategory.storageFull,
         ),
       ],
     );

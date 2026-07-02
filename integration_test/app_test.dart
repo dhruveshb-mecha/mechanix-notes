@@ -4,39 +4,30 @@ import 'package:integration_test/integration_test.dart';
 import 'package:mechanix_notes/main.dart' as app;
 import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_button.dart';
 import 'package:mechanix_notes/core/utils/icons.dart';
-import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'dart:io';
-import 'package:hive/hive.dart';
 import 'package:flutter_quill/flutter_quill.dart' show QuillEditor;
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:mechanix_notes/features/notes/bloc/notes/notes_bloc.dart';
+import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
+import 'package:mechanix_notes/features/notes/data/repository/note_repository_impl.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   group('Comprehensive End-to-end test', () {
-    String? tempPath;
+    late NoteRepository noteRepository;
 
     setUpAll(() async {
-      try {
-        if (!Hive.isAdapterRegistered(0)) {
-          Hive.registerAdapter(NoteModelAdapter());
-        }
-      } catch (_) {}
-
-      // Use a temporary directory for Hive to isolate tests
-      final directory = await Directory.systemTemp.createTemp(
-        'mechanix_notes_test_',
-      );
-      tempPath = directory.path;
-      Hive.init(tempPath);
+      noteRepository = NoteRepositoryImpl();
     });
 
     tearDownAll(() async {
-      if (tempPath != null) {
-        final directory = Directory(tempPath!);
-        if (await directory.exists()) {
-          await directory.delete(recursive: true);
+      try {
+        final notes = await noteRepository.getNotes(0, 1000);
+        if (notes.isNotEmpty) {
+          await noteRepository.deleteNotes(notes.map((n) => n.id).toList());
         }
-      }
+      } catch (_) {}
     });
 
     // Helper to find EditorButton by asset
@@ -74,6 +65,7 @@ void main() {
     ) async {
       final uniqueTitle =
           'Lifecycle Test Note ${DateTime.now().millisecondsSinceEpoch}';
+      
       app.main();
       await tester.pumpAndSettle();
 

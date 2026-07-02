@@ -135,4 +135,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get failedToSaveNote => 'Failed to save note';
+
+  @override
+  String get storageFull => 'Storage is full';
 }

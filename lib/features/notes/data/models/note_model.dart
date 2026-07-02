@@ -1,33 +1,30 @@
-import 'package:hive/hive.dart';
-part 'note_model.g.dart';
+import 'package:objectbox/objectbox.dart';
 
-@HiveType(typeId: 0)
-class NoteModel extends HiveObject {
-  @HiveField(0)
+@Entity()
+class NoteModel {
+  @Id()
+  int obxId;
+
+  @Unique()
   String id;
 
-  @HiveField(1)
+  @Index()
   String title;
-
-  @HiveField(2)
   String content;
-
-  @HiveField(3)
+  
+  @Property(type: PropertyType.date)
   DateTime createdAt;
 
-  @HiveField(4)
+  @Index()
+  @Property(type: PropertyType.date)
   DateTime updatedAt;
 
-  @HiveField(5)
   String plainText;
-
-  @HiveField(6)
   String previewText;
-
-  @HiveField(7)
   double height;
 
   NoteModel({
+    this.obxId = 0,
     required this.id,
     required this.title,
     required this.content,

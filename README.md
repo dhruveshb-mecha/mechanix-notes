@@ -14,6 +14,7 @@ Mechanix Notes is a simple and lightweight note-taking application built with Fl
 
 - [Flutter-Elinux SDK](https://github.com/flutter-elinux/flutter-elinux)
 - [Dart SDK](https://dart.dev/get-dart)
+- [Rust & Cargo](https://www.rust-lang.org/tools/install) (required for the Rust-based Tantivy search library)
 
 ### Steps to Run Notes App
 
@@ -59,9 +60,34 @@ flutter-elinux test integration_test/<test-file-name>
 - **Create Notes**: Quickly create and save notes.
 - **Edit Notes**: Update existing notes anytime.
 - **Delete Notes**: Remove unwanted notes easily.
-- **Search Notes**: Find notes instantly with search functionality.
+- **Search Notes**: Find notes instantly with search functionality (indexes notes using Tantivy with a maximum character support of 1000 characters per note).
 - **Persistent Storage**: Notes are stored locally on the device.
 - **Clean UI**: Minimal and user-friendly interface optimized for Mechanix OS.
 - **Rich Text Support**: Basic text formatting support for better note organization.
 
 ---
+
+## TODO
+- Handle disk storage errors during indexing.
+
+### Cross-Building Tantivy for aarch64
+
+For cross compile Tantivy library for aarch64
+
+```bash
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+cargo build --release --target aarch64-unknown-linux-gnu
+```
+
+### Cross-Building the Application for arm64
+
+To cross-build the application using the sysroot toolchain:
+
+```bash
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+flutter-elinux build elinux \
+  --release \
+  --target-arch=arm64 \
+  --target-compiler-triple=aarch64-linux-gnu \
+  --target-sysroot=/home/{user}/ubuntu22-arm64-sysroot
+```

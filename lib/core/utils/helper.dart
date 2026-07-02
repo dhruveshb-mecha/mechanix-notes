@@ -38,6 +38,8 @@ String localizeError(BuildContext context, ErrorCategory error) {
       return AppLocalizations.of(context)!.somethingWentWrong;
     case ErrorCategory.failedToSaveNote:
       return AppLocalizations.of(context)!.failedToSaveNote;
+    case ErrorCategory.storageFull:
+      return AppLocalizations.of(context)!.storageFull;
     case ErrorCategory.failedToLoadNotes:
       return AppLocalizations.of(context)!.failedToLoadNotes;
     case ErrorCategory.failedToDeleteNotes:

@@ -1,36 +1,46 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive/hive.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository_impl.dart';
+import 'package:mechanix_notes/features/notes/data/services/indexing_service.dart';
+import 'package:mechanix_notes/objectbox.g.dart';
+import 'package:objectbox/objectbox.dart';
 
 // ---------------------------------------------------------------------------
-// Mocks
+// Mocks & Fakes
 // ---------------------------------------------------------------------------
 
-class MockHiveBox extends Mock implements Box<NoteModel> {}
+class MockBox extends Mock implements Box<NoteModel> {}
+class MockQueryBuilder extends Mock implements QueryBuilder<NoteModel> {}
+class MockQuery extends Mock implements Query<NoteModel> {}
+class MockIndexingService extends Mock implements IndexingService {}
 
-class MockNoteModel extends Mock implements NoteModel {}
+class FakeQueryProperty extends Fake implements QueryProperty<NoteModel, Object?> {}
+class FakeQueryPropertyDateTime extends Fake implements QueryProperty<NoteModel, DateTime> {}
+class FakeQueryPropertyInt extends Fake implements QueryProperty<NoteModel, int> {}
+class FakeQueryPropertyString extends Fake implements QueryProperty<NoteModel, String> {}
+class FakeCondition extends Fake implements Condition<NoteModel> {}
 
 // ---------------------------------------------------------------------------
-// Testable subclass – lets us inject a fake Box without touching Hive globals
+// Testable subclass – lets us inject a fake Box without touching Store/Platform globals
 // ---------------------------------------------------------------------------
 
 class TestableNoteRepositoryImpl extends NoteRepositoryImpl {
   final Box<NoteModel> fakeBox;
-  bool ensureHiveCalled = false;
+  bool ensureStoreCalled = false;
 
-  TestableNoteRepositoryImpl(this.fakeBox);
+  TestableNoteRepositoryImpl(this.fakeBox, IndexingService indexingService)
+      : super(indexingService: indexingService);
 
   /// Override the getter so the implementation uses our fake box.
   @override
   Box<NoteModel> get box => fakeBox;
 
-  /// Skip real Hive initialisation in tests.
+  /// Skip real ObjectBox store initialization in tests.
   @override
-  Future<void> ensureHiveConnected() async {
-    ensureHiveCalled = true;
+  Future<void> ensureStoreConnected() async {
+    ensureStoreCalled = true;
   }
 }
 
@@ -47,14 +57,16 @@ NoteModel _makeNote({
   DateTime? updatedAt,
 }) {
   final now = DateTime.now();
-  final note = MockNoteModel();
-  when(() => note.id).thenReturn(id);
-  when(() => note.title).thenReturn(title);
-  when(() => note.previewText).thenReturn(previewText);
-  when(() => note.height).thenReturn(height);
-  when(() => note.createdAt).thenReturn(createdAt ?? now);
-  when(() => note.updatedAt).thenReturn(updatedAt ?? now);
-  return note;
+  return NoteModel(
+    id: id,
+    title: title,
+    content: 'content',
+    plainText: 'plainText',
+    previewText: previewText,
+    height: height,
+    createdAt: createdAt ?? now,
+    updatedAt: updatedAt ?? now,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -62,26 +74,70 @@ NoteModel _makeNote({
 // ---------------------------------------------------------------------------
 
 void main() {
-  late MockHiveBox mockBox;
+  late MockBox mockBox;
+  late MockQueryBuilder mockQueryBuilder;
+  late MockQuery mockQuery;
+  late MockIndexingService mockIndexingService;
   late TestableNoteRepositoryImpl repository;
 
+  setUpAll(() {
+    registerFallbackValue(NoteModel(
+      id: '',
+      title: '',
+      content: '',
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      plainText: '',
+      previewText: '',
+      height: 0.0,
+    ));
+    registerFallbackValue(FakeQueryProperty());
+    registerFallbackValue(FakeQueryPropertyDateTime());
+    registerFallbackValue(FakeQueryPropertyInt());
+    registerFallbackValue(FakeQueryPropertyString());
+    registerFallbackValue(FakeCondition());
+    registerFallbackValue(const <int>[]);
+  });
+
   setUp(() {
-    mockBox = MockHiveBox();
-    repository = TestableNoteRepositoryImpl(mockBox);
+    mockBox = MockBox();
+    mockQueryBuilder = MockQueryBuilder();
+    mockQuery = MockQuery();
+    mockIndexingService = MockIndexingService();
+    repository = TestableNoteRepositoryImpl(mockBox, mockIndexingService);
+
+    // Setup default indexing stubs
+    when(() => mockIndexingService.initialize()).thenAnswer((_) async {});
+    when(() => mockIndexingService.upsertNote(any(), any(), any())).thenAnswer((_) async {});
+    when(() => mockIndexingService.deleteNotesBatch(any())).thenAnswer((_) async {});
+    when(() => mockIndexingService.search(any())).thenAnswer((_) async => []);
+
+    // Setup default query builder stubbing
+    when(() => mockBox.query(any())).thenReturn(mockQueryBuilder);
+    when(() => mockBox.query(null)).thenReturn(mockQueryBuilder);
+    when(() => mockBox.query()).thenReturn(mockQueryBuilder);
+    
+    when(() => mockQueryBuilder.order<DateTime>(any(), flags: any(named: 'flags'))).thenReturn(mockQueryBuilder);
+    when(() => mockQueryBuilder.order<int>(any(), flags: any(named: 'flags'))).thenReturn(mockQueryBuilder);
+    when(() => mockQueryBuilder.order<String>(any(), flags: any(named: 'flags'))).thenReturn(mockQueryBuilder);
+    when(() => mockQueryBuilder.order(any(), flags: any(named: 'flags'))).thenReturn(mockQueryBuilder);
+    
+    when(() => mockQueryBuilder.build()).thenReturn(mockQuery);
+    when(() => mockQuery.close()).thenAnswer((_) {});
   });
 
   // -------------------------------------------------------------------------
-  // getAllNotes
+  // getNotes
   // -------------------------------------------------------------------------
 
-  group('getAllNotes', () {
+  group('getNotes', () {
     test('returns empty list when box is empty', () async {
-      when(() => mockBox.isEmpty).thenReturn(true);
+      when(() => mockQuery.find()).thenReturn([]);
 
-      final result = await repository.getAllNotes();
+      final result = await repository.getNotes(0, 10);
 
       expect(result, isEmpty);
-      expect(repository.ensureHiveCalled, isTrue);
+      expect(repository.ensureStoreCalled, isTrue);
     });
 
     test('returns NoteMetaData list when box has notes', () async {
@@ -101,10 +157,9 @@ void main() {
         updatedAt: now,
       );
 
-      when(() => mockBox.isEmpty).thenReturn(false);
-      when(() => mockBox.values).thenReturn([note1, note2]);
+      when(() => mockQuery.find()).thenReturn([note1, note2]);
 
-      final result = await repository.getAllNotes();
+      final result = await repository.getNotes(0, 10);
 
       expect(result, hasLength(2));
       expect(result.map((n) => n.id), containsAll(['1', '2']));
@@ -123,10 +178,9 @@ void main() {
         updatedAt: updatedAt,
       );
 
-      when(() => mockBox.isEmpty).thenReturn(false);
-      when(() => mockBox.values).thenReturn([note]);
+      when(() => mockQuery.find()).thenReturn([note]);
 
-      final result = await repository.getAllNotes();
+      final result = await repository.getNotes(0, 10);
 
       expect(result, hasLength(1));
       final meta = result.first;
@@ -138,140 +192,112 @@ void main() {
       expect(meta.updatedAt, equals(updatedAt));
     });
 
-    test('sorts notes by updatedAt in descending order', () async {
-      final oldest = DateTime(2023, 1, 1);
-      final middle = DateTime(2023, 6, 1);
-      final newest = DateTime(2024, 1, 1);
+    test('orders query by updatedAt in descending order', () async {
+      when(() => mockQuery.find()).thenReturn([]);
 
-      final noteA = _makeNote(id: 'A', title: 'Old Note', updatedAt: oldest);
-      final noteB = _makeNote(id: 'B', title: 'Mid Note', updatedAt: middle);
-      final noteC = _makeNote(id: 'C', title: 'New Note', updatedAt: newest);
+      await repository.getNotes(0, 10);
 
-      // Deliberately pass in unsorted order
-      when(() => mockBox.isEmpty).thenReturn(false);
-      when(() => mockBox.values).thenReturn([noteA, noteC, noteB]);
-
-      final result = await repository.getAllNotes();
-
-      expect(result[0].id, equals('C')); // newest first
-      expect(result[1].id, equals('B'));
-      expect(result[2].id, equals('A')); // oldest last
-    });
-
-    test('returns notes sorted even when timestamps are equal', () async {
-      final sameTime = DateTime(2024, 3, 15, 10, 0, 0);
-
-      final note1 = _makeNote(id: '1', title: 'Note 1', updatedAt: sameTime);
-      final note2 = _makeNote(id: '2', title: 'Note 2', updatedAt: sameTime);
-
-      when(() => mockBox.isEmpty).thenReturn(false);
-      when(() => mockBox.values).thenReturn([note1, note2]);
-
-      final result = await repository.getAllNotes();
-
-      // Both present, order is stable (no crash)
-      expect(result, hasLength(2));
+      verify(() => mockQueryBuilder.order(NoteModel_.updatedAt, flags: Order.descending)).called(1);
     });
 
     test('returns empty list and does not throw on exception', () async {
-      // Simulate box access throwing
-      when(() => mockBox.isEmpty).thenThrow(Exception('Hive error'));
+      when(() => mockQuery.find()).thenThrow(Exception('ObjectBox error'));
 
-      final result = await repository.getAllNotes();
+      final result = await repository.getNotes(0, 10);
 
       expect(result, isEmpty);
     });
 
-    test('calls ensureHiveConnected before accessing box', () async {
-      when(() => mockBox.isEmpty).thenReturn(true);
+    test('calls ensureStoreConnected before accessing box', () async {
+      when(() => mockQuery.find()).thenReturn([]);
 
-      await repository.getAllNotes();
+      await repository.getNotes(0, 10);
 
-      expect(repository.ensureHiveCalled, isTrue);
-    });
-
-    test('returns single note correctly', () async {
-      final note = _makeNote(id: 'solo', title: 'Solo Note');
-
-      when(() => mockBox.isEmpty).thenReturn(false);
-      when(() => mockBox.values).thenReturn([note]);
-
-      final result = await repository.getAllNotes();
-
-      expect(result, hasLength(1));
-      expect(result.first.id, equals('solo'));
-    });
-
-    test('handles large number of notes without error', () async {
-      final notes = List.generate(500, (i) {
-        return _makeNote(
-          id: 'note_$i',
-          title: 'Note $i',
-          updatedAt: DateTime.now().subtract(Duration(minutes: i)),
-        );
-      });
-
-      when(() => mockBox.isEmpty).thenReturn(false);
-      when(() => mockBox.values).thenReturn(notes);
-
-      final result = await repository.getAllNotes();
-
-      expect(result, hasLength(500));
-      // Verify descending sort: first item has smallest subtracted duration (most recent)
-      for (int i = 0; i < result.length - 1; i++) {
-        expect(
-          result[i].updatedAt.isAfter(result[i + 1].updatedAt) ||
-              result[i].updatedAt.isAtSameMomentAs(result[i + 1].updatedAt),
-          isTrue,
-          reason: 'Notes should be sorted newest-first',
-        );
-      }
+      expect(repository.ensureStoreCalled, isTrue);
     });
   });
 
   // -------------------------------------------------------------------------
-  // _sortNotes (tested indirectly via getAllNotes + directly via reflection)
+  // getNoteById & getNoteMetaData
   // -------------------------------------------------------------------------
 
-  group('_sortNotes (internal sort logic)', () {
-    test('sorts descending by updatedAt', () async {
-      final t1 = DateTime(2024, 1, 1);
-      final t2 = DateTime(2024, 6, 1);
-      final t3 = DateTime(2025, 1, 1);
+  group('getNoteById & getNoteMetaData', () {
+    test('returns metadata of single note by id correctly', () async {
+      final note = _makeNote(id: 'solo', title: 'Solo Note');
+      when(() => mockQuery.findFirst()).thenReturn(note);
 
-      final notes = [
-        NoteMetaData(
-          id: '1',
-          title: 'A',
-          height: 100,
-          createdAt: t1,
-          updatedAt: t1,
-          previewText: '',
-        ),
-        NoteMetaData(
-          id: '2',
-          title: 'B',
-          height: 100,
-          createdAt: t2,
-          updatedAt: t3,
-          previewText: '',
-        ),
-        NoteMetaData(
-          id: '3',
-          title: 'C',
-          height: 100,
-          createdAt: t2,
-          updatedAt: t2,
-          previewText: '',
-        ),
-      ];
+      final result = await repository.getNoteMetaData('solo');
 
-      // Access private method via a thin public wrapper for testing
-      final sorted = repository.sortNotes(notes);
+      expect(result, isNotNull);
+      expect(result!.id, equals('solo'));
+    });
 
-      expect(sorted[0].id, equals('2')); // t3 – newest
-      expect(sorted[1].id, equals('3')); // t2
-      expect(sorted[2].id, equals('1')); // t1 – oldest
+    test('returns NoteModel by id correctly', () async {
+      final note = _makeNote(id: 'solo', title: 'Solo Note');
+      when(() => mockQuery.findFirst()).thenReturn(note);
+
+      final result = await repository.getNoteById('solo');
+
+      expect(result, isNotNull);
+      expect(result!.id, equals('solo'));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // deleteNotes & upsertNote
+  // -------------------------------------------------------------------------
+
+  group('deleteNotes & upsertNote', () {
+    test('deleteNotes calls removeMany with correct obxIds', () async {
+      final note1 = _makeNote(id: '1', title: 'Note 1')..obxId = 10;
+      final note2 = _makeNote(id: '2', title: 'Note 2')..obxId = 20;
+
+      when(() => mockQuery.find()).thenReturn([note1, note2]);
+      when(() => mockBox.removeMany(any())).thenReturn(2);
+
+      await repository.deleteNotes(['1', '2']);
+
+      verify(() => mockBox.removeMany([10, 20])).called(1);
+    });
+
+    test('upsertNote puts note and updates obxId if existing', () async {
+      final note = _makeNote(id: '1', title: 'New Title');
+      final existing = _makeNote(id: '1', title: 'Old Title')..obxId = 42;
+
+      when(() => mockQuery.findFirst()).thenReturn(existing);
+      when(() => mockBox.put(any())).thenReturn(42);
+
+      await repository.upsertNote(note);
+
+      expect(note.obxId, 42);
+      verify(() => mockBox.put(note)).called(1);
+    });
+
+    test('upsertNote propagates DbFullException when writing to box fails', () async {
+      final note = _makeNote(id: '1', title: 'New Title');
+      when(() => mockQuery.findFirst()).thenReturn(null);
+      when(() => mockBox.put(any())).thenThrow(DbFullException('Disk full', 1018));
+
+      expect(() => repository.upsertNote(note), throwsA(isA<DbFullException>()));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // searchNotes
+  // -------------------------------------------------------------------------
+
+  group('searchNotes', () {
+    test('queries box with title and preview text contains', () async {
+      final note1 = _makeNote(id: '1', title: 'matching title');
+      final note2 = _makeNote(id: '2', title: 'other', previewText: 'matching preview');
+
+      when(() => mockIndexingService.search('match')).thenAnswer((_) async => ['1', '2']);
+      when(() => mockQuery.find()).thenReturn([note1, note2]);
+
+      final result = await repository.searchNotes('match');
+
+      expect(result, hasLength(2));
+      expect(result.map((n) => n.id), containsAll(['1', '2']));
     });
   });
 }

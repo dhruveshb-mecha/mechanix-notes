@@ -1,7 +1,7 @@
-class HiveLockedException implements Exception {
+class ObjectBoxException implements Exception {
   final String message;
 
-  HiveLockedException([
+  ObjectBoxException([
     this.message = 'Notes app is already open in another instance.',
   ]);
 

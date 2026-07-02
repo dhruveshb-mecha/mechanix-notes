@@ -10,6 +10,7 @@ import 'package:mechanix_notes/core/utils/constants.dart';
 import 'package:mechanix_notes/core/utils/helper.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
+import 'package:objectbox/objectbox.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mechanix_notes/core/utils/enums.dart';
 part 'editor_event.dart';
@@ -151,6 +152,9 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
 
       AppLogger.i('EditorBloc: Manual save success for ${current.noteId}');
       emit(EditorSaveSuccess(current.noteId));
+    } on DbFullException catch (e) {
+      AppLogger.e('EditorBloc: Manual save failed due to full database: $e');
+      emit(const EditorFailure(ErrorCategory.storageFull));
     } catch (e) {
       AppLogger.e('EditorBloc: Manual save failed: $e');
       emit(const EditorFailure(ErrorCategory.failedToSaveNote));
@@ -223,6 +227,9 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
           isNewNote: current.isNewNote ? false : current.isNewNote,
         ),
       );
+    } on DbFullException catch (e) {
+      AppLogger.e('EditorBloc: Auto-save failed due to full database: $e');
+      emit(const EditorFailure(ErrorCategory.storageFull));
     } catch (e) {
       AppLogger.e('EditorBloc: Auto-save failed: $e');
     }

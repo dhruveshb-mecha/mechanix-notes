@@ -72,5 +72,6 @@
       }
     }
   },
-  "failedToSaveNote": "Failed to save note"
+  "failedToSaveNote": "Failed to save note",
+  "storageFull": "Storage is full"
 }

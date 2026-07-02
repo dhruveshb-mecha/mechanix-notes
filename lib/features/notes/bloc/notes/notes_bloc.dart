@@ -1,5 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
+import 'package:mechanix_notes/core/exceptions/objectbox_exception.dart';
 import 'package:mechanix_notes/core/utils/app_logger.dart';
 import 'package:mechanix_notes/core/utils/constants.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_event.dart';
@@ -8,7 +9,6 @@ import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
 import 'package:mechanix_notes/features/notes/data/models/time_group.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
 import 'package:mechanix_notes/core/utils/enums.dart';
-import 'package:mechanix_notes/core/exceptions/hive_exception.dart';
 
 class NotesBloc extends Bloc<NotesEvent, NotesState> {
   final NoteRepository noteRepository;
@@ -31,24 +31,25 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     AppLogger.i("Loading notes");
 
     try {
-      // TODO: Replace with Objectbox
-      final allNotes = await noteRepository.getAllNotes();
-      final firstPage = allNotes.take(Constants.pageSize).toList();
+      final firstPage = await noteRepository.getNotes(
+        0,
+        Constants.pageSize,
+      );
       final flattened = _buildFlattenedNotes(firstPage);
-      final hasMore = allNotes.length > Constants.pageSize;
+      final hasMore = firstPage.length == Constants.pageSize;
       AppLogger.i(
-        "Notes loaded — ${allNotes.length} total, showing ${firstPage.length}",
+        "Notes loaded — showing ${firstPage.length}, hasMore: $hasMore",
       );
       emit(
         state.copyWith(
-          notes: allNotes,
+          notes: firstPage,
           groupedNotes: flattened,
           isLoading: false,
           hasMore: hasMore,
           currentPage: 0,
         ),
       );
-    } on HiveLockedException catch (e) {
+    } on ObjectBoxException catch (e) {
       AppLogger.e("App already running: $e");
       emit(
         state.copyWith(
@@ -75,13 +76,13 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
       if (state.isLoadingMore || !state.hasMore) return;
       AppLogger.i("Loading more notes");
       emit(state.copyWith(isLoadingMore: true));
-      // find currentCount of total notes
+      
       final currentCount = state.groupedNotes.whereType<NoteMetaData>().length;
 
-      final newBatch = state.notes
-          .skip(currentCount)
-          .take(Constants.pageSize)
-          .toList();
+      final newBatch = await noteRepository.getNotes(
+        currentCount,
+        Constants.pageSize,
+      );
 
       if (newBatch.isEmpty) {
         emit(state.copyWith(isLoadingMore: false, hasMore: false));
@@ -97,6 +98,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
 
       emit(
         state.copyWith(
+          notes: [...state.notes, ...newBatch],
           groupedNotes: [...state.groupedNotes, ...newEntries],
           isLoadingMore: false,
           hasMore: newBatch.length == Constants.pageSize,

@@ -14,6 +14,7 @@ enum ErrorCategory {
   noteNotFound,
   somethingWentWrong,
   failedToSaveNote,
+  storageFull,
   failedToLoadNotes,
   failedToDeleteNotes,
   appAlreadyRunning,

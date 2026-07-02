@@ -35,18 +35,22 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   flutter_quill: ^11.5.1
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
   equatable: ^2.0.8
   flutter_bloc: ^9.1.1
   uuid: ^4.5.3
   intl: ^0.19.0
   flutter_localizations:
     sdk: flutter
+  objectbox: ^5.3.2    
   bloc_test: ^10.0.0
   mocktail: ^1.0.5
   show_fps: ^1.1.0
   test: ^1.28.0
+  objectbox_flutter_libs: ^5.3.2
+  flutter_tantivy:
+    git:
+      url: https://github.com/DhanishMecha/flutter_tantivy.git
+      ref: main  
 
 dependency_overrides:
   intl: ^0.20.2
@@ -63,6 +67,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   build_runner: ^2.4.6
+  objectbox_generator: ^5.3.2
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

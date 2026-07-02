@@ -285,6 +285,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Failed to save note'**
   String get failedToSaveNote;
+
+  /// No description provided for @storageFull.
+  ///
+  /// In en, this message translates to:
+  /// **'Storage is full'**
+  String get storageFull;
 }
 
 class _AppLocalizationsDelegate
