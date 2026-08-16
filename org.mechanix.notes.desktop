@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mechanix Notes
+Comment=Notes for Mechanix OS
+Exec=mechanix_notes -s 1
+Icon=org.mechanix.notes
+Terminal=false
+Categories=Utility;Office;
+StartupNotify=true
+StartupWMClass=org.mechanix.notes
