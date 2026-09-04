@@ -83,6 +83,8 @@ jobs:
           fi
 
           echo "/opt/flutter-elinux/bin" >> $GITHUB_PATH
+          echo "/opt/flutter-elinux/flutter/bin" >> $GITHUB_PATH
+          echo "FLUTTER_ROOT=/opt/flutter-elinux/flutter" >> $GITHUB_ENV
 
       - name: Build notes
         run: |
@@ -184,6 +186,5 @@ jobs:
           name: mechanix-notes
           path: |
             ./build/elinux/arm64/release/bundle/
-            ./build/elinux/aarch64/release/bundle/
             ./dist/*.rpm
             ./dist/*.deb
