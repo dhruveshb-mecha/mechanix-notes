@@ -1,14 +1,24 @@
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
 import 'package:mechanix_notes/features/notes/bloc/search/search_bloc.dart';
 import 'package:mechanix_notes/features/notes/bloc/search/search_event.dart';
 import 'package:mechanix_notes/features/notes/bloc/search/search_state.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
-import 'package:mechanix_notes/features/notes/presentation/widgets/home/card/home_note_card_content.dart';
+import 'package:mechanix_notes/features/notes/presentation/widgets/search/search_text_highlighter.dart';
+import 'package:widgets/widgets.dart';
 
+/// A scrollable list of search results with infinite scroll pagination.
 class SearchListView extends StatefulWidget {
-  const SearchListView({super.key});
+  const SearchListView({super.key, required this.query, this.onResultSelected});
+
+  /// The active search query used for highlighting.
+  final String query;
+
+  /// Callback when a note result is tapped.
+  final ValueChanged<NoteMetaData>? onResultSelected;
 
   @override
   State<SearchListView> createState() => _SearchListViewState();
@@ -54,29 +64,14 @@ class _SearchListViewState extends State<SearchListView> {
             child: ListView.builder(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.only(top: 20, bottom: 40.0),
+              padding: const EdgeInsets.only(top: 24),
               itemCount: results.length,
               itemBuilder: (context, index) {
                 final note = results[index];
-                return HomeNoteCardContent(
+                return SearchResultTile(
                   note: note,
-                  isSelectionMode: false,
-                  isSelected: false,
-                  onTap: () {
-                    Navigator.pushNamed(
-                      context,
-                      '/note-editor',
-                      arguments: {'noteId': note.id, 'noteTitle': note.title},
-                    ).then((_) {
-                      if (context.mounted) {
-                        final searchBloc = context.read<SearchBloc>();
-                        searchBloc.add(
-                          SearchQueryChanged(query: searchBloc.state.query),
-                        );
-                      }
-                    });
-                  },
-                  onLongPress: () {},
+                  query: widget.query,
+                  onResultSelected: widget.onResultSelected,
                 );
               },
             ),
@@ -84,5 +79,74 @@ class _SearchListViewState extends State<SearchListView> {
         );
       },
     );
+  }
+}
+
+class SearchResultTile extends StatelessWidget {
+  const SearchResultTile({
+    super.key,
+    required this.note,
+    required this.query,
+    this.onResultSelected,
+  });
+
+  final NoteMetaData note;
+  final String query;
+  final ValueChanged<NoteMetaData>? onResultSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayTitle = note.title.isNotEmpty ? note.title : note.previewText;
+
+    final subtitle =
+        note.title.isNotEmpty &&
+            note.previewText.isNotEmpty &&
+            note.title != note.previewText
+        ? note.previewText
+        : null;
+
+    final formattedDate = _formatDate(note.updatedAt);
+
+    final titleStyle =
+        (context.textTheme.titleLarge ??
+                const TextStyle(fontSize: 20, height: 26 / 20))
+            .copyWith(
+              color: context.colorScheme.onSurface,
+              fontWeight: FontWeight.w400,
+            );
+
+    final highlightStyle = titleStyle.copyWith(
+      color: context.colorScheme.primary,
+    );
+
+    return MechanixListTile(
+      variant: ListTileVariant.standard,
+      label: Text.rich(
+        SearchTextHighlighter.highlight(
+          text: displayTitle,
+          query: query,
+          baseStyle: titleStyle,
+          highlightStyle: highlightStyle,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      supportingText: subtitle,
+      trailingText: formattedDate,
+      trailingTextColor: context.colorScheme.onSurfaceVariant,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 32.0,
+        vertical: 8.0,
+      ),
+      onTap: onResultSelected != null ? () => onResultSelected!(note) : null,
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    if (now.year != date.year) {
+      return DateFormat('dd MMM yy').format(date).toUpperCase();
+    }
+    return DateFormat('dd MMM').format(date).toUpperCase();
   }
 }

@@ -11,50 +11,62 @@ final class EditorInitial extends EditorState {
   const EditorInitial();
 }
 
-final class EditorLoading extends EditorState {
-  const EditorLoading();
-}
-
 final class EditorLoaded extends EditorState {
   final String noteId;
   final String title;
-  final Document? quillDocument;
+  final String markdownContent;
+  final String lastSavedContent;
+  final String lastSavedTitle;
+  final bool lastSavedIsPinned;
+  final DateTime? createdAt;
   final bool isContentLoading;
   final bool isSaving;
-  final EditorToolbar activeToolbar;
   final bool isNewNote;
   final bool isDirty;
+  final bool isPinned;
 
   const EditorLoaded({
     required this.noteId,
     required this.title,
-    this.quillDocument,
+    this.markdownContent = '',
+    this.lastSavedContent = '',
+    this.lastSavedTitle = '',
+    this.lastSavedIsPinned = false,
+    this.createdAt,
     this.isContentLoading = false,
     this.isSaving = false,
-    this.activeToolbar = EditorToolbar.none,
     this.isNewNote = false,
     this.isDirty = false,
+    this.isPinned = false,
   });
 
   EditorLoaded copyWith({
     String? noteId,
     String? title,
-    Document? quillDocument,
+    String? markdownContent,
+    String? lastSavedContent,
+    String? lastSavedTitle,
+    bool? lastSavedIsPinned,
+    DateTime? createdAt,
     bool? isContentLoading,
     bool? isSaving,
-    EditorToolbar? activeToolbar,
     bool? isNewNote,
     bool? isDirty,
+    bool? isPinned,
   }) {
     return EditorLoaded(
       noteId: noteId ?? this.noteId,
       title: title ?? this.title,
-      quillDocument: quillDocument ?? this.quillDocument,
+      markdownContent: markdownContent ?? this.markdownContent,
+      lastSavedContent: lastSavedContent ?? this.lastSavedContent,
+      lastSavedTitle: lastSavedTitle ?? this.lastSavedTitle,
+      lastSavedIsPinned: lastSavedIsPinned ?? this.lastSavedIsPinned,
+      createdAt: createdAt ?? this.createdAt,
       isContentLoading: isContentLoading ?? this.isContentLoading,
       isSaving: isSaving ?? this.isSaving,
-      activeToolbar: activeToolbar ?? this.activeToolbar,
       isNewNote: isNewNote ?? this.isNewNote,
       isDirty: isDirty ?? this.isDirty,
+      isPinned: isPinned ?? this.isPinned,
     );
   }
 
@@ -62,12 +74,16 @@ final class EditorLoaded extends EditorState {
   List<Object?> get props => [
     noteId,
     title,
-    quillDocument,
+    markdownContent,
+    lastSavedContent,
+    lastSavedTitle,
+    lastSavedIsPinned,
+    createdAt,
     isContentLoading,
     isSaving,
-    activeToolbar,
     isNewNote,
     isDirty,
+    isPinned,
   ];
 }
 

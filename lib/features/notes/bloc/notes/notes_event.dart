@@ -24,3 +24,8 @@ class ToggleNoteSelection extends NotesEvent {
 class SelectAllNotes extends NotesEvent {}
 
 class ClearSelection extends NotesEvent {}
+
+class TogglePinNote extends NotesEvent {
+  final String noteId;
+  TogglePinNote({required this.noteId});
+}

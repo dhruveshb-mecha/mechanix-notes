@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:live_markdown_editor/live_markdown_editor.dart'
+    show LiveMarkdownEditor;
 import 'package:mechanix_notes/core/utils/icons.dart';
 import 'package:mechanix_notes/main.dart' as app;
-import 'package:flutter_quill/flutter_quill.dart' show QuillEditor;
 
 import 'test_helper.dart';
 
@@ -24,7 +25,7 @@ void main() {
     testWidgets('search FAB is disabled when there are no notes', (
       tester,
     ) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       expect(IntegrationTestHelper.searchFab, findsOneWidget);
@@ -42,7 +43,7 @@ void main() {
     });
 
     testWidgets('opens search and shows initial prompt', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -59,7 +60,7 @@ void main() {
     });
 
     testWidgets('finds a note by title', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -79,7 +80,7 @@ void main() {
     });
 
     testWidgets('finds a note by body preview text', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -99,7 +100,7 @@ void main() {
     });
 
     testWidgets('search is case insensitive', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -116,7 +117,7 @@ void main() {
     testWidgets('shows no results message when nothing matches', (
       tester,
     ) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -137,7 +138,7 @@ void main() {
     testWidgets('clearing query returns to initial search prompt', (
       tester,
     ) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -157,7 +158,7 @@ void main() {
     });
 
     testWidgets('closes search screen and returns to home', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -178,7 +179,7 @@ void main() {
     testWidgets('opens a note from search results and returns to search', (
       tester,
     ) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;
@@ -194,7 +195,7 @@ void main() {
       await IntegrationTestHelper.waitForEditor(tester);
 
       expect(find.text(title), findsWidgets);
-      expect(find.byType(QuillEditor), findsOneWidget);
+      expect(find.byType(LiveMarkdownEditor), findsOneWidget);
 
       await tester.tap(
         IntegrationTestHelper.findImageAsset(NotesIcon.backIcon),
@@ -206,7 +207,7 @@ void main() {
     });
 
     testWidgets('shows multiple matching notes', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final suffix = DateTime.now().millisecondsSinceEpoch;

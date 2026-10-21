@@ -20,7 +20,7 @@ void main() {
     });
 
     testWidgets('Text Formatting Toolbar Actions', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -86,7 +86,7 @@ void main() {
     });
 
     testWidgets('Paragraph Toolbar Actions', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -147,7 +147,7 @@ void main() {
     });
 
     testWidgets('Undo / Redo', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(

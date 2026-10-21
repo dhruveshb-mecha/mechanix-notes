@@ -8,24 +8,16 @@ final class EditorInitialised extends EditorEvent {
   EditorInitialised({this.noteId, this.noteTitle});
 }
 
-final class EditorTitleChanged extends EditorEvent {
-  final String title;
-  EditorTitleChanged(this.title);
-}
-
-final class EditorToolbarToggled extends EditorEvent {
-  final EditorToolbar toolbar;
-  EditorToolbarToggled(this.toolbar);
-}
-
 final class EditorSaveRequested extends EditorEvent {
-  final List<dynamic> content;
-  final String plainText;
-  EditorSaveRequested({required this.content, required this.plainText});
+  final String content;
+  final String? plainText;
+  EditorSaveRequested({required this.content, this.plainText});
 }
 
 final class EditorAutoSaveRequested extends EditorEvent {
-  final List<dynamic> content;
-  final String plainText;
-  EditorAutoSaveRequested({required this.content, required this.plainText});
+  final String content;
+  final String? plainText;
+  EditorAutoSaveRequested({required this.content, this.plainText});
 }
+
+final class EditorPinToggled extends EditorEvent {}

@@ -19,7 +19,7 @@ void main() {
     });
 
     testWidgets('Initial Load', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       // “Notes” title is visible

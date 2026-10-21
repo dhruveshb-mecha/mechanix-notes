@@ -20,7 +20,7 @@ void main() {
     });
 
     testWidgets('Very Long Title', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -48,7 +48,7 @@ void main() {
     });
 
     testWidgets('Very Long Content', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -74,7 +74,7 @@ void main() {
     });
 
     testWidgets('Empty Note Handling', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -96,7 +96,7 @@ void main() {
     });
 
     testWidgets('Rapid Open/Close', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       for (int i = 0; i < 3; i++) {

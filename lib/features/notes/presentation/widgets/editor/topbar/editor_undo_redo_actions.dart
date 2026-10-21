@@ -1,64 +1,74 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_quill/flutter_quill.dart';
+import 'package:live_markdown_editor/live_markdown_editor.dart';
 import 'package:mechanix_notes/core/utils/icons.dart';
-import 'package:mechanix_notes/l10n/notes_localizations.dart';
+import 'package:widgets/widgets.dart';
 
 class EditorUndoRedoActions extends StatelessWidget {
-  const EditorUndoRedoActions({super.key, required this.quillController});
+  const EditorUndoRedoActions({super.key, this.controller});
 
-  final QuillController quillController;
+  final MarkdownEditorController? controller;
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: quillController,
-      builder: (_, _) => Row(
+    if (controller == null) {
+      return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _UndoRedoButton(
-            iconAsset: NotesIcon.undoIcon,
-            tooltip: AppLocalizations.of(context)!.undo,
-            isEnabled: quillController.hasUndo,
-            onPressed: quillController.hasUndo ? quillController.undo : null,
+          MechanixIconButton.standard(
+            type: IconButtonType.rounded,
+            onPressed: null,
+            foregroundColor: context.colorScheme.onSurface,
+            icon: const ImageIcon(AssetImage(NotesIcon.undoIcon)),
           ),
-          _UndoRedoButton(
-            iconAsset: NotesIcon.redoIcon,
-            tooltip: AppLocalizations.of(context)!.redo,
-            isEnabled: quillController.hasRedo,
-            onPressed: quillController.hasRedo ? quillController.redo : null,
+          MechanixIconButton.standard(
+            type: IconButtonType.rounded,
+            onPressed: null,
+            foregroundColor: context.colorScheme.onSurface,
+            icon: const ImageIcon(AssetImage(NotesIcon.redoIcon)),
+          ),
+        ],
+      );
+    }
+
+    return ListenableBuilder(
+      listenable: controller!,
+      builder: (context, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MechanixIconButton.standard(
+            type: IconButtonType.rounded,
+            size: IconButtonSize.small,
+            onPressed: controller!.canUndo ? controller!.undo : null,
+            foregroundColor: controller!.canUndo
+                ? context.colorScheme.onSurface
+                : context.colorScheme.onSurfaceVariant,
+            icon: Image.asset(
+              NotesIcon.undoIcon,
+              width: 19.5,
+              height: 16.5,
+              color: controller!.canUndo
+                  ? context.colorScheme.onSurface
+                  : context.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          MechanixIconButton.standard(
+            type: IconButtonType.rounded,
+            size: IconButtonSize.small,
+            onPressed: controller!.canRedo ? controller!.redo : null,
+            foregroundColor: controller!.canRedo
+                ? context.colorScheme.onSurface
+                : context.colorScheme.onSurfaceVariant,
+            icon: Image.asset(
+              NotesIcon.redoIcon,
+              width: 19.5,
+              height: 16.5,
+              color: controller!.canRedo
+                  ? context.colorScheme.onSurface
+                  : context.colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _UndoRedoButton extends StatelessWidget {
-  const _UndoRedoButton({
-    required this.iconAsset,
-    required this.tooltip,
-    required this.isEnabled,
-    required this.onPressed,
-  });
-
-  final String iconAsset;
-  final String tooltip;
-  final bool isEnabled;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      padding: const EdgeInsets.all(10),
-      mouseCursor: isEnabled ? SystemMouseCursors.click : MouseCursor.defer,
-      icon: Image.asset(
-        iconAsset,
-        width: 24,
-        height: 24,
-        color: isEnabled ? Colors.white : Colors.white30,
-      ),
-      tooltip: tooltip,
-      onPressed: onPressed,
     );
   }
 }

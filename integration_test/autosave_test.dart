@@ -25,7 +25,7 @@ void main() {
     });
 
     testWidgets('Should NOT Save Before 2 Seconds', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -57,7 +57,7 @@ void main() {
     testWidgets('Continuous Typing does not trigger save until stopped', (
       tester,
     ) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -98,7 +98,7 @@ void main() {
     });
 
     testWidgets('Multiple Updates', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(

@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:mechanix_notes/main.dart' as app;
-import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_button.dart';
+import 'package:live_markdown_editor/live_markdown_editor.dart'
+    show LiveMarkdownEditor;
 import 'package:mechanix_notes/core/utils/icons.dart';
-import 'dart:io';
-import 'package:flutter_quill/flutter_quill.dart' show QuillEditor;
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mechanix_notes/features/notes/bloc/notes/notes_bloc.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository_impl.dart';
+import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_button.dart';
+import 'package:mechanix_notes/main.dart' as app;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -65,8 +63,8 @@ void main() {
     ) async {
       final uniqueTitle =
           'Lifecycle Test Note ${DateTime.now().millisecondsSinceEpoch}';
-      
-      app.main();
+
+      app.main([]);
       await tester.pumpAndSettle();
 
       // 1. Create
@@ -81,15 +79,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // 3. Content
-      final quillEditorFinder = find.byType(QuillEditor);
-      await tester.tap(quillEditorFinder);
+      final liveEditorFinder = find.byType(LiveMarkdownEditor);
+      await tester.tap(liveEditorFinder);
       await tester.pumpAndSettle();
-      try {
-        await tester.enterText(quillEditorFinder, 'Lifecycle content');
-      } catch (e) {
-        final editorWidget = tester.widget<QuillEditor>(quillEditorFinder);
-        editorWidget.controller.document.insert(0, 'Lifecycle content');
-      }
+      final editorWidget = tester.widget<LiveMarkdownEditor>(liveEditorFinder);
+      editorWidget.controller.text = 'Lifecycle content';
       await tester.pumpAndSettle();
 
       // 4. Formatting
@@ -113,7 +107,7 @@ void main() {
       // 7. Delete
       await tester.longPress(find.text(uniqueTitle));
       await tester.pumpAndSettle();
-      await tester.tap(findImageAsset(NotesIcon.deleteIcon));
+      await tester.tap(findImageAsset(NotesIcon.trashIcon));
       await tester.pumpAndSettle();
       final confirmBtn = find.text('Delete');
       expect(confirmBtn, findsOneWidget);

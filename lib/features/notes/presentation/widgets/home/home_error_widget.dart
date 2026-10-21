@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:mechanix_notes/core/utils/helper.dart';
 import 'package:mechanix_notes/core/utils/enums.dart';
+import 'package:mechanix_notes/core/utils/helper.dart';
 
 class HomeErrorView extends StatelessWidget {
   const HomeErrorView({super.key, required this.error});

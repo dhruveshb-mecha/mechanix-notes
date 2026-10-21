@@ -12,26 +12,19 @@ class HomeNotesView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: BlocBuilder<NotesBloc, NotesState>(
-            buildWhen: (previous, current) =>
-                previous.groupedNotes != current.groupedNotes ||
-                previous.isLoading != current.isLoading ||
-                previous.error != current.error,
-            builder: (context, state) {
-              if (state.isLoading) return const HomeLoadingView();
-              if (state.error != null) {
-                return HomeErrorView(error: state.error!);
-              }
-              if (state.groupedNotes.isEmpty) return const HomeEmptyView();
-              return HomeListView(groupedNotes: state.groupedNotes);
-            },
-          ),
-        ),
-      ],
+    return BlocBuilder<NotesBloc, NotesState>(
+      buildWhen: (previous, current) =>
+          previous.groupedNotes != current.groupedNotes ||
+          previous.isLoading != current.isLoading ||
+          previous.error != current.error,
+      builder: (context, state) {
+        if (state.isLoading) return const HomeLoadingView();
+        if (state.error != null) {
+          return HomeErrorView(error: state.error!);
+        }
+        if (state.groupedNotes.isEmpty) return const HomeEmptyView();
+        return HomeListView(groupedNotes: state.groupedNotes);
+      },
     );
   }
 }

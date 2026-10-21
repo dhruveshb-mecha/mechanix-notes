@@ -1,0 +1,15 @@
+{
+    "cmake.sourceDirectory": "/home/batman/Work/mechanix-notes/elinux",
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit",
+        "source.removeUnusedImports": "explicit"
+    },
+    "[dart]": {
+        "editor.formatOnSave": true,
+        "editor.formatOnType": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit",
+            "source.removeUnusedImports": "explicit"
+        }
+    }
+}

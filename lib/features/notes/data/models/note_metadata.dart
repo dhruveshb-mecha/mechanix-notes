@@ -5,6 +5,7 @@ class NoteMetaData {
   final DateTime updatedAt;
   final String previewText;
   final double height;
+  final bool isPinned;
 
   const NoteMetaData({
     required this.id,
@@ -13,5 +14,6 @@ class NoteMetaData {
     required this.updatedAt,
     required this.previewText,
     required this.height,
+    this.isPinned = false,
   });
 }

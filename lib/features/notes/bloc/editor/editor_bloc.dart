@@ -1,18 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 
+import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:equatable/equatable.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_quill/flutter_quill.dart';
 import 'package:mechanix_notes/core/utils/app_logger.dart';
 import 'package:mechanix_notes/core/utils/constants.dart';
+import 'package:mechanix_notes/core/utils/enums.dart';
 import 'package:mechanix_notes/core/utils/helper.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
 import 'package:objectbox/objectbox.dart';
 import 'package:uuid/uuid.dart';
-import 'package:mechanix_notes/core/utils/enums.dart';
+
 part 'editor_event.dart';
 part 'editor_state.dart';
 
@@ -21,10 +20,12 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
 
   EditorBloc(this._repository) : super(const EditorInitial()) {
     on<EditorInitialised>(_onInitialised);
-    on<EditorTitleChanged>(_onTitleChanged);
-    on<EditorToolbarToggled>(_onToolbarToggled);
-    on<EditorSaveRequested>(_onSaveRequested);
-    on<EditorAutoSaveRequested>(_onAutoSaveRequested);
+    on<EditorSaveRequested>(_onSaveRequested, transformer: sequential());
+    on<EditorAutoSaveRequested>(
+      _onAutoSaveRequested,
+      transformer: sequential(),
+    );
+    on<EditorPinToggled>(_onPinToggled, transformer: sequential());
   }
 
   // Event Handlers
@@ -53,16 +54,23 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
           return;
         }
 
-        final quillDoc = await compute(decodeDocumentInIsolate, note.content);
+        final initialContent = note.content.trim().isEmpty
+            ? '# '
+            : note.content;
 
         AppLogger.i('EditorBloc: Content ready for ${event.noteId}');
         emit(
           EditorLoaded(
             noteId: note.id,
             title: event.noteTitle ?? note.title,
-            quillDocument: quillDoc,
+            markdownContent: initialContent,
+            lastSavedContent: initialContent,
+            lastSavedTitle: event.noteTitle ?? note.title,
+            lastSavedIsPinned: note.isPinned,
+            createdAt: note.createdAt,
             isContentLoading: false,
             isNewNote: false,
+            isPinned: note.isPinned,
           ),
         );
       } else {
@@ -73,7 +81,11 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
           EditorLoaded(
             noteId: newId,
             title: '',
-            quillDocument: Document(),
+            markdownContent: '# ',
+            lastSavedContent: '# ',
+            lastSavedTitle: '',
+            lastSavedIsPinned: false,
+            createdAt: DateTime.now(),
             isContentLoading: false,
             isNewNote: true,
           ),
@@ -85,24 +97,6 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
     }
   }
 
-  void _onTitleChanged(EditorTitleChanged event, Emitter<EditorState> emit) {
-    final current = state;
-    if (current is! EditorLoaded) return;
-    emit(current.copyWith(title: event.title));
-  }
-
-  void _onToolbarToggled(
-    EditorToolbarToggled event,
-    Emitter<EditorState> emit,
-  ) {
-    final current = state;
-    if (current is! EditorLoaded) return;
-    final next = current.activeToolbar == event.toolbar
-        ? EditorToolbar.none
-        : event.toolbar;
-    emit(current.copyWith(activeToolbar: next));
-  }
-
   Future<void> _onSaveRequested(
     EditorSaveRequested event,
     Emitter<EditorState> emit,
@@ -111,11 +105,11 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
     if (current is! EditorLoaded) return;
 
     try {
-      final existing = await _repository.getNoteById(current.noteId);
-      final deltaJson = jsonEncode(event.content);
+      final markdown = event.content;
+      final plainText = (event.plainText ?? markdownToPlainText(markdown))
+          .trim();
 
-      final isEmpty =
-          current.title.trim().isEmpty && event.plainText.trim().isEmpty;
+      final isEmpty = current.title.trim().isEmpty && plainText.isEmpty;
 
       if (isEmpty) {
         if (current.isNewNote) {
@@ -128,9 +122,35 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
         return;
       }
 
-      // Check if content is unchanged
-      if (existing != null) {
-        if (existing.title == current.title && existing.content == deltaJson) {
+      NoteModel? existing;
+      if (current.lastSavedContent.isEmpty) {
+        existing = await _repository.getNoteById(current.noteId);
+      }
+
+      final note = buildNote(
+        current: current,
+        content: markdown,
+        plainText: plainText,
+        existing: existing,
+      );
+
+      // Check if content is unchanged using in-memory baseline
+      if (!current.isNewNote) {
+        final lastSavedContent = existing != null
+            ? existing.content
+            : current.lastSavedContent;
+        final lastSavedTitle = existing != null
+            ? existing.title
+            : current.lastSavedTitle;
+        final lastSavedIsPinned = existing != null
+            ? existing.isPinned
+            : current.lastSavedIsPinned;
+
+        final isContentUnchanged = lastSavedContent == markdown;
+        final isTitleUnchanged = lastSavedTitle == note.title;
+        final isPinUnchanged = lastSavedIsPinned == note.isPinned;
+
+        if (isContentUnchanged && isTitleUnchanged && isPinUnchanged) {
           AppLogger.i('EditorBloc: Discarding unchanged edit');
           emit(
             EditorDiscarded(noteId: current.isDirty ? current.noteId : null),
@@ -139,14 +159,7 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
         }
       }
 
-      emit(current.copyWith(isSaving: true));
-
-      final note = buildNote(
-        current: current,
-        deltaJson: deltaJson,
-        plainText: event.plainText,
-        existing: existing,
-      );
+      emit(current.copyWith(isSaving: true, title: note.title));
 
       await _repository.upsertNote(note);
 
@@ -161,28 +174,68 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
     }
   }
 
+  (String title, String previewText) _extractTitleAndPreview(
+    String currentTitle,
+    String plainText,
+  ) {
+    final trimmed = plainText.trim();
+    if (trimmed.isEmpty) {
+      return (currentTitle, '');
+    }
+
+    final lines = plainText
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+
+    if (lines.length > 1) {
+      final title = lines.first;
+      final bodyText = lines.skip(1).join(' ');
+      final preview = bodyText.length > Constants.notePreviewTextMaxLength
+          ? bodyText.substring(0, Constants.notePreviewTextMaxLength)
+          : bodyText;
+      return (title, preview);
+    }
+
+    // Only 1 line of text:
+    final singleLine = lines.first;
+    if (currentTitle.isNotEmpty && currentTitle != singleLine) {
+      final preview = singleLine.length > Constants.notePreviewTextMaxLength
+          ? singleLine.substring(0, Constants.notePreviewTextMaxLength)
+          : singleLine;
+      return (currentTitle, preview);
+    }
+
+    final preview = singleLine.length > Constants.notePreviewTextMaxLength
+        ? singleLine.substring(0, Constants.notePreviewTextMaxLength)
+        : singleLine;
+    return (singleLine, preview);
+  }
+
   NoteModel buildNote({
     required EditorLoaded current,
-    required String deltaJson,
+    required String content,
     required String plainText,
     NoteModel? existing,
   }) {
     final now = DateTime.now();
 
-    final trimmedText = plainText.trim();
-    final previewText = trimmedText.length > Constants.noteTitleMaxLength
-        ? trimmedText.substring(0, Constants.noteTitleMaxLength)
-        : trimmedText;
+    final (title, previewText) = _extractTitleAndPreview(
+      current.title,
+      plainText,
+    );
 
     return NoteModel(
       id: current.noteId,
-      title: current.title,
-      content: deltaJson,
+      title: title,
+      content: content,
       plainText: plainText,
       previewText: previewText,
       height: _estimateHeight(plainText),
-      createdAt: existing?.createdAt ?? now,
+      createdAt: existing?.createdAt ?? current.createdAt ?? now,
       updatedAt: now,
+      isPinned: current.isPinned,
     );
   }
 
@@ -194,37 +247,63 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
     if (current is! EditorLoaded) return;
 
     try {
-      final existing = await _repository.getNoteById(current.noteId);
-      final deltaJson = jsonEncode(event.content);
+      final markdown = event.content;
+      final plainText = (event.plainText ?? markdownToPlainText(markdown))
+          .trim();
 
-      // Don't auto-save if nothing changed
-      if (existing != null &&
-          existing.title == current.title &&
-          existing.content == deltaJson) {
-        return;
-      }
-
-      // Don't auto-save if new and empty
-      if (current.isNewNote &&
-          current.title.trim().isEmpty &&
-          event.plainText.trim().isEmpty) {
-        return;
+      NoteModel? existing;
+      if (current.lastSavedContent.isEmpty) {
+        existing = await _repository.getNoteById(current.noteId);
       }
 
       final note = buildNote(
         current: current,
-        deltaJson: deltaJson,
-        plainText: event.plainText,
+        content: markdown,
+        plainText: plainText,
         existing: existing,
       );
+
+      // Don't auto-save if nothing changed
+      if (!current.isNewNote) {
+        final lastSavedContent = existing != null
+            ? existing.content
+            : current.lastSavedContent;
+        final lastSavedTitle = existing != null
+            ? existing.title
+            : current.lastSavedTitle;
+        final lastSavedIsPinned = existing != null
+            ? existing.isPinned
+            : current.lastSavedIsPinned;
+
+        final isContentUnchanged = lastSavedContent == markdown;
+        final isTitleUnchanged = lastSavedTitle == note.title;
+        final isPinUnchanged = lastSavedIsPinned == note.isPinned;
+
+        if (isContentUnchanged && isTitleUnchanged && isPinUnchanged) {
+          return;
+        }
+      }
+
+      // Don't auto-save if new and empty
+      if (current.isNewNote && note.title.trim().isEmpty && plainText.isEmpty) {
+        return;
+      }
 
       await _repository.upsertNote(note);
 
       AppLogger.i('EditorBloc: Auto-save success for ${current.noteId}');
+      final latestState = state;
+      if (latestState is! EditorLoaded) return;
+
       emit(
-        current.copyWith(
+        latestState.copyWith(
+          title: note.title,
+          lastSavedContent: markdown,
+          lastSavedTitle: note.title,
+          lastSavedIsPinned: latestState.isPinned,
+          createdAt: note.createdAt,
           isDirty: true,
-          isNewNote: current.isNewNote ? false : current.isNewNote,
+          isNewNote: false,
         ),
       );
     } on DbFullException catch (e) {
@@ -232,6 +311,27 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
       emit(const EditorFailure(ErrorCategory.storageFull));
     } catch (e) {
       AppLogger.e('EditorBloc: Auto-save failed: $e');
+    }
+  }
+
+  Future<void> _onPinToggled(
+    EditorPinToggled event,
+    Emitter<EditorState> emit,
+  ) async {
+    final current = state;
+    if (current is! EditorLoaded) return;
+    final nextPinned = !current.isPinned;
+
+    emit(
+      current.copyWith(
+        isPinned: nextPinned,
+        lastSavedIsPinned: nextPinned,
+        isDirty: true,
+      ),
+    );
+
+    if (!current.isNewNote) {
+      await _repository.togglePinNote(current.noteId);
     }
   }
 

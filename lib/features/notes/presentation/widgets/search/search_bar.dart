@@ -1,102 +1,169 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mechanix_notes/core/utils/colors.dart';
 import 'package:mechanix_notes/core/utils/icons.dart';
-import 'package:mechanix_notes/features/notes/bloc/search/search_bloc.dart';
-import 'package:mechanix_notes/features/notes/bloc/search/search_event.dart';
+import 'package:mechanix_notes/l10n/notes_localizations.dart';
+import 'package:widgets/widgets.dart';
 
-class SearchBar extends StatefulWidget {
-  const SearchBar({super.key});
+class SearchAppBar extends StatelessWidget implements PreferredSizeWidget {
+  const SearchAppBar({
+    super.key,
+    required this.isSearchActive,
+    required this.controller,
+    required this.focusNode,
+    this.title,
+    this.searchHint,
+    this.onQueryChanged,
+    this.onSubmitted,
+    this.onSearchIconTap,
+    this.onClear,
+    this.onClose,
+    this.autofocus = true,
+    this.searchWidget,
+    this.searchDecoration,
+  });
+
+  /// Optional custom search widget to override the default search widget.
+  final Widget? searchWidget;
+
+  /// Optional decoration for the search widget container.
+  final Decoration? searchDecoration;
+
+  /// Whether the app bar is in active search mode.
+  final bool isSearchActive;
+
+  /// Text controller for the search input.
+  final TextEditingController controller;
+
+  /// Focus node for the search input.
+  final FocusNode focusNode;
+
+  /// Title displayed in the collapsed state.
+  final Widget? title;
+
+  /// Placeholder hint text in active search mode.
+  final String? searchHint;
+
+  /// Called when the search query text changes.
+  final ValueChanged<String>? onQueryChanged;
+
+  /// Called when the search query is submitted.
+  final ValueChanged<String>? onSubmitted;
+
+  /// Called when the search icon in collapsed mode is tapped.
+  final VoidCallback? onSearchIconTap;
+
+  /// Called when the clear (X) button is pressed while text is present.
+  final VoidCallback? onClear;
+
+  /// Called when closing the search mode.
+  final VoidCallback? onClose;
+
+  /// Whether the search field should autofocus when entering active mode.
+  final bool autofocus;
+
+  static final Size _preferredSize = const MechanixAppBar.small().preferredSize;
 
   @override
-  State<SearchBar> createState() => _SearchBarState();
-}
-
-class _SearchBarState extends State<SearchBar> {
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
-  Timer? _debounceTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    Future.delayed(const Duration(milliseconds: 400), () {
-      if (mounted) {
-        _focusNode.requestFocus();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _debounceTimer?.cancel();
-    _searchController.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  void onChanged(String query) {
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 400), () {
-      if (!mounted) return;
-      context.read<SearchBloc>().add(SearchQueryChanged(query: query));
-    });
-  }
+  Size get preferredSize => _preferredSize;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 16.0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: NotesColors.bottomBarBg,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: NotesColors.searchBarColor, width: 1),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  Image.asset(NotesIcon.searchIcon, width: 24, height: 24),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      focusNode: _focusNode,
-                      autofocus: false,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: 'Search in notes',
-                        hintStyle: TextStyle(
-                          color: NotesColors.placeholderColor,
-                        ),
-                        border: InputBorder.none,
+    final l10n = AppLocalizations.of(context);
+    final effectiveTitle =
+        title ?? Text((l10n?.notes ?? 'Notes').toUpperCase());
+    final effectiveSearchHint =
+        searchHint ?? (l10n?.searchNote ?? 'Search note').toUpperCase();
+
+    if (!isSearchActive) {
+      final searchAction = MechanixIconButton.standard(
+        icon: Image.asset(NotesIcon.searchIcon, width: 20, height: 20),
+        onPressed: () {
+          focusNode.requestFocus();
+          onSearchIconTap?.call();
+        },
+      );
+
+      return MechanixAppBar.small(
+        title: effectiveTitle,
+        actions: [searchAction],
+        backgroundColor: context.colorScheme.surfaceContainerLowest,
+      );
+    }
+
+    final colorScheme = context.colorScheme;
+    final textTheme = context.textTheme;
+
+    return MechanixAppBar.search(
+      primary: false,
+      automaticallyImplyLeading: false,
+      backgroundColor: colorScheme.surfaceContainerLowest,
+      searchWidget:
+          searchWidget ??
+          Container(
+            height: 44,
+            decoration: searchDecoration,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: [
+                Image.asset(
+                  NotesIcon.searchIcon,
+                  color: colorScheme.onSurfaceVariant,
+                  width: 19.5,
+                  height: 19.5,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    autofocus: autofocus,
+                    textInputAction: TextInputAction.search,
+                    autocorrect: false,
+                    onChanged: onQueryChanged,
+                    onSubmitted: onSubmitted,
+                    cursorColor: colorScheme.primary,
+                    style: textTheme.headlineSmall?.copyWith(
+                      color: colorScheme.onSurface,
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      errorBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                      fillColor: Colors.transparent,
+                      hintText: effectiveSearchHint,
+                      hintStyle: textTheme.headlineSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
                       ),
-                      onChanged: onChanged,
                     ),
                   ),
-                ],
-              ),
+                ),
+                MechanixIconButton.standard(
+                  icon: Image.asset(
+                    NotesIcon.closeIcon,
+                    color: colorScheme.onSurface,
+                    width: 15,
+                    height: 15,
+                  ),
+                  onPressed: () {
+                    if (controller.text.isNotEmpty) {
+                      controller.clear();
+                      focusNode.requestFocus();
+                      if (onClear != null) {
+                        onClear?.call();
+                      } else {
+                        onQueryChanged?.call('');
+                      }
+                    } else {
+                      onClose?.call();
+                    }
+                  },
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 12),
-          IconButton(
-            icon: const Icon(Icons.cancel, color: Colors.white),
-            onPressed: () {
-              if (_searchController.text.isNotEmpty) {
-                _debounceTimer?.cancel();
-                _searchController.clear();
-                context.read<SearchBloc>().add(ClearSearch());
-              } else {
-                Navigator.of(context).pop();
-              }
-            },
-          ),
-        ],
-      ),
     );
   }
 }

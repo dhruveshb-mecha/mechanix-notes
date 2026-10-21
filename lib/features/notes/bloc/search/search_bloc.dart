@@ -1,3 +1,4 @@
+import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mechanix_notes/core/utils/app_logger.dart';
 import 'package:mechanix_notes/core/utils/constants.dart';
@@ -9,7 +10,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
   final NoteRepository noteRepository;
 
   SearchBloc({required this.noteRepository}) : super(const SearchState()) {
-    on<SearchQueryChanged>(_onSearchQueryChanged);
+    on<SearchQueryChanged>(_onSearchQueryChanged, transformer: restartable());
     on<LoadMoreSearchResults>(_onLoadMoreSearchResults);
     on<ClearSearch>(_onClearSearch);
   }

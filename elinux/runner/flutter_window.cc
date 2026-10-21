@@ -9,6 +9,9 @@
 #include <iostream>
 #include <thread>
 
+#include <mechanix_common/mechanix_common_plugin.h>
+#include <mechanix_common/dbus_instance_manager.h>
+
 #include "flutter/generated_plugin_registrant.h"
 
 FlutterWindow::FlutterWindow(
@@ -26,6 +29,12 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
 
+    // Manually register the singleton plugin
+  mechanix::MechanixCommon::GetInstance()->RegisterSingleton(
+      "MechanixNotes",
+      flutter_view_controller_->engine()->GetRegistrarForPlugin(
+          "MechanixCommonPlugin"));
+
   // Register Flutter plugins.
   RegisterPlugins(flutter_view_controller_->engine());
 
@@ -42,7 +51,13 @@ void FlutterWindow::Run() {
   // Main loop.
   auto next_flutter_event_time =
       std::chrono::steady_clock::time_point::clock::now();
+      auto* manager = mechanix::MechanixCommon::GetInstance()->GetInstanceManager();
   while (flutter_view_controller_->view()->DispatchEvent()) {
+    // Process D-Bus messages
+    if (manager) {
+      manager->Process();
+    }
+
     // Wait until the next event.
     {
       auto wait_duration =

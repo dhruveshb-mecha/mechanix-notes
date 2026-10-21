@@ -32,4 +32,5 @@ doc/api/
 # Packaging output
 /dist/
 /stage/
+coverage/
 __pycache__/

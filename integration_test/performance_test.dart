@@ -20,14 +20,14 @@ void main() {
     });
 
     testWidgets('App Startup and List Load', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       expect(find.text('Notes'), findsWidgets);
     });
 
     testWidgets('Editor Typing Performance', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(

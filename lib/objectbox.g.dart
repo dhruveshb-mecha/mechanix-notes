@@ -22,7 +22,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(1, 940365444142600783),
     name: 'NoteModel',
-    lastPropertyId: const obx_int.IdUid(9, 5161078860881858672),
+    lastPropertyId: const obx_int.IdUid(12, 49895023985911002),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -82,6 +82,19 @@ final _entities = <obx_int.ModelEntity>[
         type: 8,
         flags: 0,
       ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 5972503054547634601),
+        name: 'isPinned',
+        type: 1,
+        flags: 8,
+        indexId: const obx_int.IdUid(4, 3439249776280742230),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 49895023985911002),
+        name: 'fileName',
+        type: 9,
+        flags: 0,
+      ),
     ],
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
@@ -132,12 +145,12 @@ obx_int.ModelDefinition getObjectBoxModel() {
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
     lastEntityId: const obx_int.IdUid(1, 940365444142600783),
-    lastIndexId: const obx_int.IdUid(3, 8195120955829410814),
+    lastIndexId: const obx_int.IdUid(4, 3439249776280742230),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
     retiredIndexUids: const [],
-    retiredPropertyUids: const [],
+    retiredPropertyUids: const [8297143530793730413],
     retiredRelationUids: const [],
     modelVersion: 5,
     modelVersionParserMinimum: 5,
@@ -159,7 +172,10 @@ obx_int.ModelDefinition getObjectBoxModel() {
         final contentOffset = fbb.writeString(object.content);
         final plainTextOffset = fbb.writeString(object.plainText);
         final previewTextOffset = fbb.writeString(object.previewText);
-        fbb.startTable(10);
+        final fileNameOffset = object.fileName == null
+            ? null
+            : fbb.writeString(object.fileName!);
+        fbb.startTable(13);
         fbb.addInt64(0, object.obxId);
         fbb.addOffset(1, idOffset);
         fbb.addOffset(2, titleOffset);
@@ -169,6 +185,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
         fbb.addOffset(6, plainTextOffset);
         fbb.addOffset(7, previewTextOffset);
         fbb.addFloat64(8, object.height);
+        fbb.addBool(9, object.isPinned);
+        fbb.addOffset(11, fileNameOffset);
         fbb.finish(fbb.endTable());
         return object.obxId;
       },
@@ -208,6 +226,15 @@ obx_int.ModelDefinition getObjectBoxModel() {
           20,
           0,
         );
+        final isPinnedParam = const fb.BoolReader().vTableGet(
+          buffer,
+          rootOffset,
+          22,
+          false,
+        );
+        final fileNameParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 26);
         final object = NoteModel(
           obxId: obxIdParam,
           id: idParam,
@@ -218,6 +245,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
           plainText: plainTextParam,
           previewText: previewTextParam,
           height: heightParam,
+          isPinned: isPinnedParam,
+          fileName: fileNameParam,
         );
 
         return object;
@@ -273,5 +302,15 @@ class NoteModel_ {
   /// See [NoteModel.height].
   static final height = obx.QueryDoubleProperty<NoteModel>(
     _entities[0].properties[8],
+  );
+
+  /// See [NoteModel.isPinned].
+  static final isPinned = obx.QueryBooleanProperty<NoteModel>(
+    _entities[0].properties[9],
+  );
+
+  /// See [NoteModel.fileName].
+  static final fileName = obx.QueryStringProperty<NoteModel>(
+    _entities[0].properties[10],
   );
 }

@@ -25,6 +25,8 @@ contents:
       mode: 0755
   - src: ./stage/bundle/lib/libapp.so
     dst: /usr/share/mechanix/mechanix-notes/lib/libapp.so
+  - src: ./stage/bundle/lib/libmechanix_common_plugin.so
+    dst: /usr/share/mechanix/mechanix-notes/lib/libmechanix_common_plugin.so 
   - src: ./stage/bundle/lib/libflutter_tantivy.so
     dst: /usr/share/mechanix/mechanix-notes/lib/libflutter_tantivy.so
   - src: ./stage/bundle/lib/libobjectbox.so

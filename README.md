@@ -1,18 +1,26 @@
 # Mechanix Notes
 
-Notes App for the Mechanix OS
+Notes application for Mechanix OS on Mecha Comet devices.
 
 ## Overview
 
-Mechanix Notes is a simple and lightweight note-taking application built with Flutter for Mecha Comet devices. It provides an easy way to create, edit, and manage notes with a clean and user-friendly interface.
+Mechanix Notes is a fast, lightweight note-taking application built with Flutter for Mechanix OS. It combines the speed and responsiveness of a local database (**ObjectBox**) and a high-performance Rust full-text search engine (**Tantivy**) with the freedom and interoperability of storing notes as plain **Markdown (`.md`)** files on the filesystem.
 
 ---
 
-## Install Guide
+## Key Features
+
+- **Live Markdown Editor**: Native markdown writing experience with dedicated formatting controls for headings, bold, italic, strikethrough, unordered lists, links, blockquotes, and code blocks, along with undo and redo controls.
+- **Plain Markdown Filesystem Storage**: Notes are saved directly as individual, human-readable `.md` files under `~/Documents/notes/` (or `$XDG_DOCUMENTS_DIR/notes`), with atomic writes, filename sanitization, and duplicate conflict handling.
+- **Fast Full-Text Search**: Powered by Tantivy (Rust FFI via `flutter_tantivy`), indexing note titles and content (up to 3,000 characters per note) for instant search results.
+
+---
+
+## Install & Run Guide
 
 ### Pre-requisites
 
-- [Flutter-Elinux SDK](https://github.com/flutter-elinux/flutter-elinux)
+- [Flutter-eLinux SDK](https://github.com/flutter-elinux/flutter-elinux)
 - [Dart SDK](https://dart.dev/get-dart)
 - [Rust & Cargo](https://www.rust-lang.org/tools/install) (required for the Rust-based Tantivy search library)
 
@@ -41,6 +49,8 @@ flutter-elinux pub get
 flutter-elinux run
 ```
 
+---
+
 ## Testing
 
 ### Run Unit & BLoC Tests
@@ -49,30 +59,25 @@ flutter-elinux run
 flutter-elinux test
 ```
 
+Or using standard Flutter:
+
+```bash
+flutter test
+```
+
 ### Run Integration Tests
 
 ```bash
 flutter-elinux test integration_test/<test-file-name>
 ```
 
-## Key Features
-
-- **Create Notes**: Quickly create and save notes.
-- **Edit Notes**: Update existing notes anytime.
-- **Delete Notes**: Remove unwanted notes easily.
-- **Search Notes**: Find notes instantly with search functionality (indexes notes using Tantivy with a maximum character support of 1000 characters per note).
-- **Persistent Storage**: Notes are stored locally on the device.
-- **Clean UI**: Minimal and user-friendly interface optimized for Mechanix OS.
-- **Rich Text Support**: Basic text formatting support for better note organization.
-
 ---
 
-## TODO
-- Handle disk storage errors during indexing.
+## Cross-Compilation
 
 ### Cross-Building Tantivy for aarch64
 
-For cross compile Tantivy library for aarch64
+To cross-compile the Tantivy library for `aarch64`:
 
 ```bash
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
@@ -91,3 +96,9 @@ flutter-elinux build elinux \
   --target-compiler-triple=aarch64-linux-gnu \
   --target-sysroot=/home/{user}/ubuntu22-arm64-sysroot
 ```
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for details on recent updates and releases.

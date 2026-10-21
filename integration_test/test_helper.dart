@@ -1,17 +1,25 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:live_markdown_editor/live_markdown_editor.dart'
+    show LiveMarkdownEditor;
 import 'package:mechanix_notes/core/utils/icons.dart';
-import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_button.dart';
-import 'package:flutter_quill/flutter_quill.dart' show QuillEditor;
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository_impl.dart';
+import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_button.dart';
 
 class IntegrationTestHelper {
   NoteRepository? noteRepository;
+  Directory? tempDir;
 
-  Future<void> setUp() async {
-    noteRepository = NoteRepositoryImpl();
+  Future<void> setUp({bool useTempDir = false}) async {
+    if (useTempDir) {
+      tempDir = Directory.systemTemp.createTempSync('mechanix_notes_it_');
+      noteRepository = NoteRepositoryImpl();
+    } else {
+      noteRepository = NoteRepositoryImpl();
+    }
   }
 
   Future<void> tearDown() async {
@@ -21,6 +29,11 @@ class IntegrationTestHelper {
         if (notes.isNotEmpty) {
           await noteRepository!.deleteNotes(notes.map((n) => n.id).toList());
         }
+      } catch (_) {}
+    }
+    if (tempDir != null && tempDir!.existsSync()) {
+      try {
+        tempDir!.deleteSync(recursive: true);
       } catch (_) {}
     }
   }
@@ -53,12 +66,17 @@ class IntegrationTestHelper {
   }
 
   static Future<void> enterQuillText(WidgetTester tester, String text) async {
-    final quillEditorFinder = find.byType(QuillEditor);
-    try {
-      await tester.enterText(quillEditorFinder, text);
-    } catch (e) {
-      final editorWidget = tester.widget<QuillEditor>(quillEditorFinder);
-      editorWidget.controller.document.insert(0, text);
+    final editorFinder = find.byType(LiveMarkdownEditor);
+    if (editorFinder.evaluate().isNotEmpty) {
+      final editorWidget = tester.widget<LiveMarkdownEditor>(editorFinder);
+      editorWidget.controller.text = text;
+      await tester.pump();
+      return;
+    }
+    final editableFinder = find.byType(EditableText);
+    if (editableFinder.evaluate().isNotEmpty) {
+      await tester.enterText(editableFinder.first, text);
+      await tester.pump();
     }
   }
 

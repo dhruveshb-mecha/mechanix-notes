@@ -20,7 +20,7 @@ void main() {
     });
 
     testWidgets('Open Existing Note and Back Navigation', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       // Create a note first
@@ -65,7 +65,7 @@ void main() {
     });
 
     testWidgets('Unsaved Typing + Back', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       await tester.tap(

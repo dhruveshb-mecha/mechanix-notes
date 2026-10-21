@@ -8,4 +8,5 @@ abstract class NoteRepository {
   Future<void> deleteNotes(List<String> ids);
   Future<void> upsertNote(NoteModel note);
   Future<List<NoteMetaData>> searchNotes(String query);
+  Future<bool> togglePinNote(String id);
 }

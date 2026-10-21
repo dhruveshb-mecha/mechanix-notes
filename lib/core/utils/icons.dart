@@ -17,11 +17,17 @@ class NotesIcon {
   static const String textstyleIcon = "assets/icons/textstyle.png";
   static const String menuIcon = "assets/icons/menu.png";
   static const String paragraphIcon = "assets/icons/paragraph.png";
-  static const String threedotIcon = "assets/icons/threedot.png";
+  static const String moreVertIcon = "assets/icons/more_vert.png";
   static const String saveIcon = "assets/icons/save.png";
-  static const String deleteIcon = "assets/icons/delete.png";
   static const String closeIcon = "assets/icons/close.png";
   static const String codeBlockIcon = "assets/icons/code_block.png";
   static const String selectAllIcon = "assets/icons/selectall.png";
   static const String cancelIcon = "assets/icons/cancel.png";
+  static const String fileIcon = 'assets/icons/file.png';
+  static const String imageIcon = 'assets/icons/image.png';
+  static const String musicIcon = 'assets/icons/music.png';
+  static const String strikethroughIcon = 'assets/icons/strikethrough.png';
+  static const String textModeIcon = 'assets/icons/textmode.png';
+  static const String trashIcon = 'assets/icons/trash.png';
+  static const String pinIcon = 'assets/icons/pin.png';
 }

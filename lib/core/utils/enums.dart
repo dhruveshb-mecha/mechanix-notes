@@ -1,4 +1,5 @@
 enum TimeCategory {
+  pinned,
   recent,
   today,
   yesterday,
@@ -20,5 +21,3 @@ enum ErrorCategory {
   appAlreadyRunning,
   unknown,
 }
-
-enum EditorToolbar { none, textStyle, menu, options }

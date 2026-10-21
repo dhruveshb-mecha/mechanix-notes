@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:mechanix_notes/main.dart' as app;
 import 'package:mechanix_notes/core/utils/icons.dart';
+import 'package:mechanix_notes/main.dart' as app;
+
 import 'test_helper.dart';
 
 void main() {
@@ -20,7 +21,7 @@ void main() {
     });
 
     testWidgets('Delete Single Note from Home', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final uniqueTitle =
@@ -55,7 +56,7 @@ void main() {
 
       // Tap delete icon in bottom bar
       await tester.tap(
-        IntegrationTestHelper.findImageAsset(NotesIcon.deleteIcon),
+        IntegrationTestHelper.findImageAsset(NotesIcon.trashIcon),
       );
       await tester.pumpAndSettle();
 
@@ -72,7 +73,7 @@ void main() {
     });
 
     testWidgets('Delete Cancel Flow', (tester) async {
-      app.main();
+      app.main([]);
       await tester.pumpAndSettle();
 
       final uniqueTitle =
@@ -107,7 +108,7 @@ void main() {
 
       // Tap delete icon in bottom bar
       await tester.tap(
-        IntegrationTestHelper.findImageAsset(NotesIcon.deleteIcon),
+        IntegrationTestHelper.findImageAsset(NotesIcon.trashIcon),
       );
       await tester.pumpAndSettle();
 

@@ -9,7 +9,10 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get notes => 'Notes';
+  String get notes => 'NOTES';
+
+  @override
+  String get pinned => 'Pinned';
 
   @override
   String get last7Days => 'Last 7 Days';
@@ -28,7 +31,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noteNotFound => 'Note not found';
 
   @override
-  String get noNotesFound => 'No notes found';
+  String get noNotesFound => 'No note found';
+
+  @override
+  String get writeANote => 'Write a note';
 
   @override
   String get recent => 'Recent';
@@ -138,4 +144,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get storageFull => 'Storage is full';
+
+  @override
+  String get pinNote => 'Pin note';
+
+  @override
+  String get unpinNote => 'Unpin note';
+
+  @override
+  String get moveToTrash => 'Move to trash';
+
+  @override
+  String get moveToTrashPrompt => 'Do you want to move this note to trash?';
+
+  @override
+  String get trash => 'Trash';
+
+  @override
+  String get searchNote => 'Search note';
+
+  @override
+  String get failedToPerformSearch => 'Failed to perform search';
 }

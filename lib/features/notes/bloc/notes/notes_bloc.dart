@@ -3,17 +3,20 @@ import 'package:intl/intl.dart';
 import 'package:mechanix_notes/core/exceptions/objectbox_exception.dart';
 import 'package:mechanix_notes/core/utils/app_logger.dart';
 import 'package:mechanix_notes/core/utils/constants.dart';
+import 'package:mechanix_notes/core/utils/enums.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_event.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_state.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
 import 'package:mechanix_notes/features/notes/data/models/time_group.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
-import 'package:mechanix_notes/core/utils/enums.dart';
 
 class NotesBloc extends Bloc<NotesEvent, NotesState> {
   final NoteRepository noteRepository;
+  final DateTime Function() clock;
 
-  NotesBloc({required this.noteRepository}) : super(const NotesState()) {
+  NotesBloc({required this.noteRepository, DateTime Function()? clock})
+    : clock = clock ?? DateTime.now,
+      super(const NotesState()) {
     on<LoadNotes>(_loadNotes);
     on<LoadMoreNotes>(_loadMoreNotes);
     on<RefreshNote>(_refreshNote);
@@ -22,6 +25,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     on<ToggleNoteSelection>(_toggleNoteSelection);
     on<SelectAllNotes>(_selectAllNotes);
     on<ClearSelection>(_clearSelection);
+    on<TogglePinNote>(_togglePinNote);
 
     add(LoadNotes());
   }
@@ -31,10 +35,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     AppLogger.i("Loading notes");
 
     try {
-      final firstPage = await noteRepository.getNotes(
-        0,
-        Constants.pageSize,
-      );
+      final firstPage = await noteRepository.getNotes(0, Constants.pageSize);
       final flattened = _buildFlattenedNotes(firstPage);
       final hasMore = firstPage.length == Constants.pageSize;
       AppLogger.i(
@@ -76,8 +77,8 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
       if (state.isLoadingMore || !state.hasMore) return;
       AppLogger.i("Loading more notes");
       emit(state.copyWith(isLoadingMore: true));
-      
-      final currentCount = state.groupedNotes.whereType<NoteMetaData>().length;
+
+      final currentCount = state.notes.length;
 
       final newBatch = await noteRepository.getNotes(
         currentCount,
@@ -89,17 +90,34 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
         return;
       }
 
-      final lastNote = state.groupedNotes.whereType<NoteMetaData>().last;
-      final lastGroup = _getTimeGroupForNote(lastNote);
-      final newEntries = _buildFlattenedNotes(
-        newBatch,
-        existingGroup: lastGroup,
-      );
+      final hasPinnedInNewBatch = newBatch.any((n) => n.isPinned);
+
+      List<Object> newFlattened;
+      if (hasPinnedInNewBatch) {
+        // Safe fallback for rare case where pinned notes span across page boundaries
+        newFlattened = _buildFlattenedNotes([...state.notes, ...newBatch]);
+      } else {
+        // O(1) incremental path: find the last active chronological group
+        TimeGroup? lastGroup;
+        for (var i = state.groupedNotes.length - 1; i >= 0; i--) {
+          final item = state.groupedNotes[i];
+          if (item is TimeGroup && item.category != TimeCategory.pinned) {
+            lastGroup = item;
+            break;
+          }
+        }
+
+        final appended = _buildFlattenedNotes(
+          newBatch,
+          existingGroup: lastGroup,
+        );
+        newFlattened = [...state.groupedNotes, ...appended];
+      }
 
       emit(
         state.copyWith(
           notes: [...state.notes, ...newBatch],
-          groupedNotes: [...state.groupedNotes, ...newEntries],
+          groupedNotes: newFlattened,
           isLoadingMore: false,
           hasMore: newBatch.length == Constants.pageSize,
           currentPage: state.currentPage + 1,
@@ -118,9 +136,25 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     if (notes.isEmpty) return [];
 
     final List<Object> flattened = [];
-    TimeGroup? currentGroup = existingGroup;
+    final pinnedNotes = notes.where((n) => n.isPinned).toList();
 
-    for (final note in notes) {
+    // 1. Pinned notes section at the top
+    if (pinnedNotes.isNotEmpty) {
+      if (existingGroup?.category != TimeCategory.pinned) {
+        flattened.add(const TimeGroup(TimeCategory.pinned));
+      }
+      flattened.addAll(pinnedNotes);
+    }
+
+    // 2. All notes (including pinned notes) grouped chronologically by time
+    final chronologicalNotes = List<NoteMetaData>.from(notes)
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+    TimeGroup? currentGroup = existingGroup?.category == TimeCategory.pinned
+        ? null
+        : existingGroup;
+
+    for (final note in chronologicalNotes) {
       final group = _getTimeGroupForNote(note);
       if (group != currentGroup) {
         flattened.add(group);
@@ -140,14 +174,23 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
       if (updatedNote == null) return;
       final group = _getTimeGroupForNote(updatedNote);
 
-      if (group.category != TimeCategory.recent) return;
+      if (!updatedNote.isPinned && group.category != TimeCategory.recent) {
+        return;
+      }
       emit(state.copyWith(isRefreshed: false));
 
-      // Remove old entry and insert updated note at top (most recently updated)
+      // Remove old entry and insert updated note
       final updatedNotes = [
         updatedNote,
         ...state.notes.where((n) => n.id != event.noteId),
       ];
+
+      updatedNotes.sort((a, b) {
+        if (a.isPinned != b.isPinned) {
+          return a.isPinned ? -1 : 1;
+        }
+        return b.updatedAt.compareTo(a.updatedAt);
+      });
 
       // Reset pagination to first page only
       final firstPage = updatedNotes.take(Constants.pageSize).toList();
@@ -167,6 +210,19 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
       );
     } catch (e) {
       AppLogger.e("Error refreshing note: $e");
+    }
+  }
+
+  Future<void> _togglePinNote(
+    TogglePinNote event,
+    Emitter<NotesState> emit,
+  ) async {
+    try {
+      emit(state.copyWith(isRefreshed: false));
+      await noteRepository.togglePinNote(event.noteId);
+      add(LoadNotes());
+    } catch (e) {
+      AppLogger.e("Error toggling pin note: $e");
     }
   }
 
@@ -259,7 +315,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
   }
 
   TimeGroup _getTimeGroupForNote(NoteMetaData note) {
-    final now = DateTime.now();
+    final now = clock();
     final updated = note.updatedAt;
     final today = DateTime(now.year, now.month, now.day);
     final dateOnly = DateTime(updated.year, updated.month, updated.day);

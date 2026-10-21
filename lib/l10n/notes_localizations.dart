@@ -97,8 +97,14 @@ abstract class AppLocalizations {
   /// No description provided for @notes.
   ///
   /// In en, this message translates to:
-  /// **'Notes'**
+  /// **'NOTES'**
   String get notes;
+
+  /// No description provided for @pinned.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned'**
+  String get pinned;
 
   /// No description provided for @last7Days.
   ///
@@ -133,8 +139,14 @@ abstract class AppLocalizations {
   /// No description provided for @noNotesFound.
   ///
   /// In en, this message translates to:
-  /// **'No notes found'**
+  /// **'No note found'**
   String get noNotesFound;
+
+  /// No description provided for @writeANote.
+  ///
+  /// In en, this message translates to:
+  /// **'Write a note'**
+  String get writeANote;
 
   /// No description provided for @recent.
   ///
@@ -291,6 +303,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Storage is full'**
   String get storageFull;
+
+  /// No description provided for @pinNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin note'**
+  String get pinNote;
+
+  /// No description provided for @unpinNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin note'**
+  String get unpinNote;
+
+  /// No description provided for @moveToTrash.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to trash'**
+  String get moveToTrash;
+
+  /// No description provided for @moveToTrashPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Do you want to move this note to trash?'**
+  String get moveToTrashPrompt;
+
+  /// No description provided for @trash.
+  ///
+  /// In en, this message translates to:
+  /// **'Trash'**
+  String get trash;
+
+  /// No description provided for @searchNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Search note'**
+  String get searchNote;
+
+  /// No description provided for @failedToPerformSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to perform search'**
+  String get failedToPerformSearch;
 }
 
 class _AppLocalizationsDelegate

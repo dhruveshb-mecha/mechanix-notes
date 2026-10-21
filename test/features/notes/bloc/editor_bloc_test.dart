@@ -1,13 +1,12 @@
-import 'dart:convert';
 import 'package:bloc_test/bloc_test.dart';
-import 'package:flutter_quill/flutter_quill.dart' show Document;
+import 'package:mechanix_notes/core/utils/constants.dart';
 import 'package:mechanix_notes/core/utils/enums.dart';
 import 'package:mechanix_notes/features/notes/bloc/editor/editor_bloc.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:test/test.dart';
 import 'package:objectbox/objectbox.dart';
+import 'package:test/test.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -19,17 +18,18 @@ class FakeNoteModel extends Fake implements NoteModel {}
 
 const kTestNoteId = 'test-note-id-123';
 const kTestTitle = 'Test Note Title';
-const kEmptyDelta = '[{"insert":"\\n"}]';
-const kSomeDelta = '[{"insert":"Hello World\\n"}]';
+const kEmptyMarkdown = '';
+const kSomeMarkdown = 'Hello World\n';
 const kSomePlainText = 'Hello World\n';
 
 NoteModel makeNote({
   String id = kTestNoteId,
   String title = kTestTitle,
-  String content = kSomeDelta,
+  String content = kSomeMarkdown,
   String plainText = kSomePlainText,
   DateTime? createdAt,
   DateTime? updatedAt,
+  bool isPinned = false,
 }) {
   final now = DateTime(2024, 1, 1);
   final previewText = plainText.length > 40
@@ -44,6 +44,7 @@ NoteModel makeNote({
     height: 104.0,
     createdAt: createdAt ?? now,
     updatedAt: updatedAt ?? now,
+    isPinned: isPinned,
   );
 }
 
@@ -78,15 +79,14 @@ void main() {
 
   group('EditorInitialised — create mode', () {
     blocTest<EditorBloc, EditorState>(
-      'emits EditorLoaded with empty title, blank document, isNewNote=true',
+      'emits EditorLoaded with empty title, blank document with H1 format, isNewNote=true',
       build: buildBloc,
       act: (bloc) => bloc.add(EditorInitialised()),
       expect: () => [
         isA<EditorLoaded>()
             .having((s) => s.title, 'title', '')
             .having((s) => s.isNewNote, 'isNewNote', true)
-            .having((s) => s.isContentLoading, 'isContentLoading', false)
-            .having((s) => s.quillDocument, 'quillDocument', isNotNull),
+            .having((s) => s.markdownContent, 'markdownContent', '# '),
       ],
       verify: (_) => verifyNever(() => repository.getNoteById(any())),
     );
@@ -112,15 +112,6 @@ void main() {
       act: (bloc) => bloc.add(EditorInitialised()),
       verify: (bloc) {
         expect((bloc.state as EditorLoaded).isDirty, false);
-      },
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'activeToolbar defaults to none in create mode',
-      build: buildBloc,
-      act: (bloc) => bloc.add(EditorInitialised()),
-      verify: (bloc) {
-        expect((bloc.state as EditorLoaded).activeToolbar, EditorToolbar.none);
       },
     );
   });
@@ -151,7 +142,7 @@ void main() {
             .having((s) => s.noteId, 'noteId', kTestNoteId)
             .having((s) => s.title, 'title', kTestTitle)
             .having((s) => s.isContentLoading, 'isContentLoading', false)
-            .having((s) => s.quillDocument, 'quillDocument', isNotNull)
+            .having((s) => s.markdownContent, 'markdownContent', isNotEmpty)
             .having((s) => s.isNewNote, 'isNewNote', false),
       ],
     );
@@ -243,7 +234,7 @@ void main() {
       verify: (bloc) {
         expect(bloc.state, isA<EditorLoaded>());
         final loaded = bloc.state as EditorLoaded;
-        expect(loaded.quillDocument, isNotNull);
+        expect(loaded.markdownContent, isNotNull);
       },
     );
 
@@ -262,8 +253,27 @@ void main() {
       verify: (bloc) {
         expect(bloc.state, isA<EditorLoaded>());
         final loaded = bloc.state as EditorLoaded;
-        expect(loaded.quillDocument, isNotNull);
+        expect(loaded.markdownContent, isNotNull);
         expect(loaded.isContentLoading, false);
+      },
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'initializes empty existing note content with H1 format',
+      build: buildBloc,
+      setUp: () {
+        when(
+          () => repository.getNoteById(kTestNoteId),
+        ).thenAnswer((_) async => makeNote(content: kEmptyMarkdown));
+      },
+      act: (bloc) => bloc.add(
+        EditorInitialised(noteId: kTestNoteId, noteTitle: kTestTitle),
+      ),
+      wait: const Duration(milliseconds: 300),
+      verify: (bloc) {
+        expect(bloc.state, isA<EditorLoaded>());
+        final loaded = bloc.state as EditorLoaded;
+        expect(loaded.markdownContent, '# ');
       },
     );
 
@@ -283,183 +293,6 @@ void main() {
   });
 
   // ════════════════════════════════════════════════════════════════════════════
-  // EditorTitleChanged
-  // ════════════════════════════════════════════════════════════════════════════
-
-  group('EditorTitleChanged', () {
-    blocTest<EditorBloc, EditorState>(
-      'updates title in EditorLoaded',
-      build: buildBloc,
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: '',
-        quillDocument: Document(),
-        isNewNote: true,
-      ),
-      act: (bloc) => bloc.add(EditorTitleChanged('New Title')),
-      expect: () => [
-        isA<EditorLoaded>().having((s) => s.title, 'title', 'New Title'),
-      ],
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'is a no-op when state is not EditorLoaded',
-      build: buildBloc,
-      act: (bloc) => bloc.add(EditorTitleChanged('Ignored')),
-      expect: () => [],
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'handles empty string title',
-      build: buildBloc,
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: 'Some Title',
-        quillDocument: Document(),
-        isNewNote: false,
-      ),
-      act: (bloc) => bloc.add(EditorTitleChanged('')),
-      expect: () => [isA<EditorLoaded>().having((s) => s.title, 'title', '')],
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'does not reset other fields when title changes',
-      build: buildBloc,
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: 'Old',
-        quillDocument: Document(),
-        isNewNote: false,
-        activeToolbar: EditorToolbar.textStyle,
-      ),
-      act: (bloc) => bloc.add(EditorTitleChanged('New')),
-      verify: (bloc) {
-        final s = bloc.state as EditorLoaded;
-        expect(s.activeToolbar, EditorToolbar.textStyle);
-        expect(s.isNewNote, false);
-        expect(s.noteId, kTestNoteId);
-      },
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'multiple title changes only keeps last value',
-      build: buildBloc,
-      seed: () =>
-          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
-      act: (bloc) {
-        bloc.add(EditorTitleChanged('A'));
-        bloc.add(EditorTitleChanged('AB'));
-        bloc.add(EditorTitleChanged('ABC'));
-      },
-      verify: (bloc) {
-        expect((bloc.state as EditorLoaded).title, 'ABC');
-      },
-    );
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // EditorToolbarToggled
-  // ════════════════════════════════════════════════════════════════════════════
-
-  group('EditorToolbarToggled', () {
-    blocTest<EditorBloc, EditorState>(
-      'activates a toolbar when none is active',
-      build: buildBloc,
-      seed: () => const EditorLoaded(
-        noteId: kTestNoteId,
-        title: kTestTitle,
-        activeToolbar: EditorToolbar.none,
-        isNewNote: false,
-      ),
-      act: (bloc) => bloc.add(EditorToolbarToggled(EditorToolbar.textStyle)),
-      expect: () => [
-        isA<EditorLoaded>().having(
-          (s) => s.activeToolbar,
-          'toolbar',
-          EditorToolbar.textStyle,
-        ),
-      ],
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'closes toolbar when same toolbar toggled again',
-      build: buildBloc,
-      seed: () => const EditorLoaded(
-        noteId: kTestNoteId,
-        title: kTestTitle,
-        activeToolbar: EditorToolbar.textStyle,
-        isNewNote: false,
-      ),
-      act: (bloc) => bloc.add(EditorToolbarToggled(EditorToolbar.textStyle)),
-      expect: () => [
-        isA<EditorLoaded>().having(
-          (s) => s.activeToolbar,
-          'toolbar',
-          EditorToolbar.none,
-        ),
-      ],
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'switches from one toolbar to another',
-      build: buildBloc,
-      seed: () => const EditorLoaded(
-        noteId: kTestNoteId,
-        title: kTestTitle,
-        activeToolbar: EditorToolbar.textStyle,
-        isNewNote: false,
-      ),
-      act: (bloc) => bloc.add(EditorToolbarToggled(EditorToolbar.menu)),
-      expect: () => [
-        isA<EditorLoaded>().having(
-          (s) => s.activeToolbar,
-          'toolbar',
-          EditorToolbar.menu,
-        ),
-      ],
-    );
-
-    for (final toolbar in EditorToolbar.values.where(
-      (t) => t != EditorToolbar.none,
-    )) {
-      blocTest<EditorBloc, EditorState>(
-        'can activate toolbar: $toolbar',
-        build: buildBloc,
-        seed: () => const EditorLoaded(
-          noteId: kTestNoteId,
-          title: kTestTitle,
-          activeToolbar: EditorToolbar.none,
-          isNewNote: false,
-        ),
-        act: (bloc) => bloc.add(EditorToolbarToggled(toolbar)),
-        verify: (bloc) {
-          expect((bloc.state as EditorLoaded).activeToolbar, toolbar);
-        },
-      );
-    }
-
-    blocTest<EditorBloc, EditorState>(
-      'is a no-op when state is not EditorLoaded',
-      build: buildBloc,
-      act: (bloc) => bloc.add(EditorToolbarToggled(EditorToolbar.menu)),
-      expect: () => [],
-    );
-
-    blocTest<EditorBloc, EditorState>(
-      'toggling none toolbar when already none keeps it none',
-      build: buildBloc,
-      seed: () => const EditorLoaded(
-        noteId: kTestNoteId,
-        title: kTestTitle,
-        activeToolbar: EditorToolbar.none,
-        isNewNote: false,
-      ),
-      act: (bloc) => bloc.add(EditorToolbarToggled(EditorToolbar.none)),
-      expect: () => <EditorState>[],
-    );
-  });
-
-  // ════════════════════════════════════════════════════════════════════════════
   // EditorSaveRequested — new note
   // ════════════════════════════════════════════════════════════════════════════
 
@@ -470,14 +303,10 @@ void main() {
       setUp: () {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
       },
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: '',
-        quillDocument: Document(),
-        isNewNote: true,
-      ),
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(content: jsonDecode(kEmptyDelta), plainText: '   '),
+        EditorSaveRequested(content: kEmptyMarkdown, plainText: '   '),
       ),
       expect: () => [isA<EditorDiscarded>()],
       verify: (_) => verifyNever(() => repository.upsertNote(any())),
@@ -490,15 +319,10 @@ void main() {
       setUp: () {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
       },
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: '',
-        quillDocument: Document(),
-        isNewNote: true,
-      ),
-      act: (bloc) => bloc.add(
-        EditorSaveRequested(content: jsonDecode(kEmptyDelta), plainText: ''),
-      ),
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
+      act: (bloc) =>
+          bloc.add(EditorSaveRequested(content: kEmptyMarkdown, plainText: '')),
       verify: (bloc) {
         final s = bloc.state as EditorDiscarded;
         expect(s.noteId, isNull);
@@ -512,15 +336,13 @@ void main() {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
-      act: (bloc) => bloc.add(
-        EditorSaveRequested(content: jsonDecode(kEmptyDelta), plainText: ''),
-      ),
+      act: (bloc) =>
+          bloc.add(EditorSaveRequested(content: kEmptyMarkdown, plainText: '')),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
         isA<EditorSaveSuccess>().having((s) => s.noteId, 'noteId', kTestNoteId),
@@ -535,17 +357,10 @@ void main() {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: '',
-        quillDocument: Document(),
-        isNewNote: true,
-      ),
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
@@ -560,17 +375,13 @@ void main() {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       verify: (_) {
         verify(() => repository.upsertNote(any())).called(1);
@@ -587,19 +398,15 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
-        final longText = 'A' * 200;
+        final longText = 'A' * (Constants.notePreviewTextMaxLength + 50);
         bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: longText,
-          ),
+          EditorSaveRequested(content: kSomeMarkdown, plainText: longText),
         );
       },
       verify: (_) {
@@ -607,13 +414,13 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).captured;
         final note = captured.first as NoteModel;
-        expect(note.previewText.length, 40);
-        expect(note.previewText, 'A' * 40);
+        expect(note.previewText.length, Constants.notePreviewTextMaxLength);
+        expect(note.previewText, 'A' * Constants.notePreviewTextMaxLength);
       },
     );
 
     blocTest<EditorBloc, EditorState>(
-      'does NOT truncate previewText when plainText is exactly 40 chars',
+      'does NOT truncate previewText when plainText is exactly max length chars',
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
@@ -621,19 +428,15 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
-        final exactText = 'A' * 40;
+        final exactText = 'A' * Constants.notePreviewTextMaxLength;
         bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: exactText,
-          ),
+          EditorSaveRequested(content: kSomeMarkdown, plainText: exactText),
         );
       },
       verify: (_) {
@@ -641,14 +444,13 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).captured;
         final note = captured.first as NoteModel;
-        // length == 40, condition is > 40 so no truncation
-        expect(note.previewText.length, 40);
-        expect(note.previewText, 'A' * 40);
+        expect(note.previewText.length, Constants.notePreviewTextMaxLength);
+        expect(note.previewText, 'A' * Constants.notePreviewTextMaxLength);
       },
     );
 
     blocTest<EditorBloc, EditorState>(
-      'truncates previewText to 40 chars when plainText is 41 chars',
+      'truncates previewText when plainText is max length + 1 chars',
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
@@ -656,19 +458,15 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
-        final justOver = 'A' * 41;
+        final justOver = 'A' * (Constants.notePreviewTextMaxLength + 1);
         bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: justOver,
-          ),
+          EditorSaveRequested(content: kSomeMarkdown, plainText: justOver),
         );
       },
       verify: (_) {
@@ -676,8 +474,8 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).captured;
         final note = captured.first as NoteModel;
-        expect(note.previewText.length, 40);
-        expect(note.previewText, 'A' * 40);
+        expect(note.previewText.length, Constants.notePreviewTextMaxLength);
+        expect(note.previewText, 'A' * Constants.notePreviewTextMaxLength);
       },
     );
 
@@ -691,17 +489,13 @@ void main() {
           () => repository.upsertNote(any()),
         ).thenThrow(Exception('DB error'));
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
@@ -722,17 +516,13 @@ void main() {
           () => repository.upsertNote(any()),
         ).thenThrow(DbFullException('DB full', 1018));
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
@@ -753,17 +543,13 @@ void main() {
           () => repository.getNoteById(any()),
         ).thenThrow(Exception('DB connection lost'));
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorFailure>().having(
@@ -784,19 +570,15 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
         // 5 chars → ceil(5/60) = 1 line → 1*24 + 80 = 104
         bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: 'Short',
-          ),
+          EditorSaveRequested(content: kSomeMarkdown, plainText: 'Short'),
         );
       },
       verify: (_) {
@@ -817,17 +599,14 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle, // non-empty title so note is not discarded
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
         // 0 chars → ceil(0/60)=0 → clamp(1,20)=1 → 1*24+80=104
-        bloc.add(
-          EditorSaveRequested(content: jsonDecode(kEmptyDelta), plainText: ''),
-        );
+        bloc.add(EditorSaveRequested(content: kEmptyMarkdown, plainText: ''));
       },
       verify: (_) {
         final captured = verify(
@@ -847,19 +626,15 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
         // 60 chars → ceil(60/60)=1 → 104; then 61 chars → ceil(61/60)=2 → 128
         bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: 'A' * 60,
-          ),
+          EditorSaveRequested(content: kSomeMarkdown, plainText: 'A' * 60),
         );
       },
       verify: (_) {
@@ -880,17 +655,13 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       verify: (_) {
         final captured = verify(
@@ -910,19 +681,15 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
         // 61 chars → ceil(61/60)=2 → 2*24+80=128
         bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: 'A' * 61,
-          ),
+          EditorSaveRequested(content: kSomeMarkdown, plainText: 'A' * 61),
         );
       },
       verify: (_) {
@@ -943,20 +710,16 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
         // 60*21 = 1260 chars → ceil(1260/60) = 21 → clamped to 20 → 20*24+80=560
         final longText = 'A' * (60 * 21);
         bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: longText,
-          ),
+          EditorSaveRequested(content: kSomeMarkdown, plainText: longText),
         );
       },
       verify: (_) {
@@ -972,10 +735,7 @@ void main() {
       'is a no-op when state is not EditorLoaded',
       build: buildBloc,
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [],
     );
@@ -991,21 +751,17 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
-          (_) async => makeNote(title: kTestTitle, content: kSomeDelta),
+          (_) async => makeNote(title: kTestTitle, content: kSomeMarkdown),
         );
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
         // isDirty defaults to false
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       // FIX: bloc emits EditorDiscarded(noteId: null) because isDirty is false
       expect: () => [
@@ -1022,21 +778,17 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
-          (_) async => makeNote(title: kTestTitle, content: kSomeDelta),
+          (_) async => makeNote(title: kTestTitle, content: kSomeMarkdown),
         );
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
         isDirty: true, // was auto-saved previously
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       // FIX: bloc emits EditorDiscarded(noteId: current.noteId) when isDirty=true
       expect: () => [
@@ -1049,21 +801,17 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
-          (_) async => makeNote(title: 'Old Title', content: kSomeDelta),
+          (_) async => makeNote(title: 'Old Title', content: kSomeMarkdown),
         );
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: 'New Title',
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
@@ -1080,21 +828,17 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
-          (_) async => makeNote(title: kTestTitle, content: kEmptyDelta),
+          (_) async => makeNote(title: kTestTitle, content: kEmptyMarkdown),
         );
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
@@ -1115,17 +859,13 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: 'Different Title',
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       verify: (_) {
         final captured = verify(
@@ -1148,17 +888,13 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: 'Updated',
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       verify: (_) {
         final captured = verify(
@@ -1173,24 +909,20 @@ void main() {
       'emits EditorFailure(failedToSaveNote) when upsertNote throws',
       build: buildBloc,
       setUp: () {
-        when(
-          () => repository.getNoteById(kTestNoteId),
-        ).thenAnswer((_) async => makeNote(title: 'Old', content: kEmptyDelta));
+        when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
+          (_) async => makeNote(title: 'Old', content: kEmptyMarkdown),
+        );
         when(
           () => repository.upsertNote(any()),
         ).thenThrow(Exception('Network error'));
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: 'New',
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
@@ -1210,17 +942,13 @@ void main() {
           () => repository.getNoteById(any()),
         ).thenThrow(Exception('Timeout'));
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorFailure>().having(
@@ -1240,17 +968,13 @@ void main() {
         ).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
-        EditorSaveRequested(
-          content: jsonDecode(kSomeDelta),
-          plainText: kSomePlainText,
-        ),
+        EditorSaveRequested(content: kSomeMarkdown, plainText: kSomePlainText),
       ),
       expect: () => [
         isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
@@ -1270,15 +994,10 @@ void main() {
           () => repository.getNoteById(kTestNoteId),
         ).thenAnswer((_) async => makeNote());
       },
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: '',
-        quillDocument: Document(),
-        isNewNote: false,
-      ),
-      act: (bloc) => bloc.add(
-        EditorSaveRequested(content: jsonDecode(kEmptyDelta), plainText: ''),
-      ),
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: false),
+      act: (bloc) =>
+          bloc.add(EditorSaveRequested(content: kEmptyMarkdown, plainText: '')),
       expect: () => [
         isA<EditorDeleteRequest>().having(
           (s) => s.noteId,
@@ -1303,7 +1022,7 @@ void main() {
       build: buildBloc,
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1316,17 +1035,10 @@ void main() {
       setUp: () {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
       },
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: '',
-        quillDocument: Document(),
-        isNewNote: true,
-      ),
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
       act: (bloc) => bloc.add(
-        EditorAutoSaveRequested(
-          content: jsonDecode(kEmptyDelta),
-          plainText: '   ',
-        ),
+        EditorAutoSaveRequested(content: kEmptyMarkdown, plainText: '   '),
       ),
       expect: () => [],
       verify: (_) => verifyNever(() => repository.upsertNote(any())),
@@ -1337,18 +1049,17 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
-          (_) async => makeNote(title: kTestTitle, content: kSomeDelta),
+          (_) async => makeNote(title: kTestTitle, content: kSomeMarkdown),
         );
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1363,15 +1074,14 @@ void main() {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1388,15 +1098,14 @@ void main() {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1412,15 +1121,14 @@ void main() {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1435,19 +1143,18 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
-          (_) async => makeNote(title: kTestTitle, content: kEmptyDelta),
+          (_) async => makeNote(title: kTestTitle, content: kEmptyMarkdown),
         );
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1462,19 +1169,18 @@ void main() {
       build: buildBloc,
       setUp: () {
         when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
-          (_) async => makeNote(title: 'Old Title', content: kSomeDelta),
+          (_) async => makeNote(title: 'Old Title', content: kSomeMarkdown),
         );
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: 'New Title',
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1490,15 +1196,14 @@ void main() {
           () => repository.upsertNote(any()),
         ).thenThrow(Exception('Network error'));
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1518,15 +1223,14 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: 'Changed Title',
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1548,19 +1252,15 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) {
-        final longText = 'B' * 100;
+        final longText = 'B' * (Constants.notePreviewTextMaxLength + 50);
         bloc.add(
-          EditorAutoSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: longText,
-          ),
+          EditorAutoSaveRequested(content: kSomeMarkdown, plainText: longText),
         );
       },
       verify: (_) {
@@ -1568,8 +1268,8 @@ void main() {
           () => repository.upsertNote(captureAny()),
         ).captured;
         final note = captured.first as NoteModel;
-        expect(note.previewText.length, 40);
-        expect(note.previewText, 'B' * 40);
+        expect(note.previewText.length, Constants.notePreviewTextMaxLength);
+        expect(note.previewText, 'B' * Constants.notePreviewTextMaxLength);
       },
     );
 
@@ -1580,15 +1280,14 @@ void main() {
         when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle, // title present
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kEmptyDelta),
+          content: kEmptyMarkdown,
           plainText:
               '', // empty body — but title is non-empty so skip guard doesn't fire
         ),
@@ -1606,15 +1305,14 @@ void main() {
           () => repository.getNoteById(any()),
         ).thenThrow(Exception('Connection reset'));
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1629,19 +1327,18 @@ void main() {
       setUp: () {
         when(
           () => repository.getNoteById(kTestNoteId),
-        ).thenAnswer((_) async => makeNote(content: kEmptyDelta));
+        ).thenAnswer((_) async => makeNote(content: kEmptyMarkdown));
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: false,
         isDirty: false,
       ),
       act: (bloc) => bloc.add(
         EditorAutoSaveRequested(
-          content: jsonDecode(kSomeDelta),
+          content: kSomeMarkdown,
           plainText: kSomePlainText,
         ),
       ),
@@ -1651,6 +1348,58 @@ void main() {
         expect(s.isDirty, true);
       },
     );
+
+    blocTest<EditorBloc, EditorState>(
+      'never calls getNoteById during auto-save when lastSavedContent baseline is present in memory',
+      build: buildBloc,
+      setUp: () {
+        when(() => repository.upsertNote(any())).thenAnswer((_) async {});
+      },
+      seed: () => EditorLoaded(
+        noteId: kTestNoteId,
+        title: kTestTitle,
+        markdownContent: '# Initial',
+        lastSavedContent: '# Initial',
+        lastSavedTitle: kTestTitle,
+        createdAt: DateTime(2025, 5, 20),
+        isNewNote: false,
+      ),
+      act: (bloc) => bloc.add(
+        EditorAutoSaveRequested(
+          content: '# Initial\nNew line added',
+          plainText: 'Initial\nNew line added',
+        ),
+      ),
+      verify: (_) {
+        verifyNever(() => repository.getNoteById(any()));
+        verify(() => repository.upsertNote(any())).called(1);
+      },
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'skips auto-save entirely with zero repository calls when content matches lastSavedContent',
+      build: buildBloc,
+      seed: () => EditorLoaded(
+        noteId: kTestNoteId,
+        title: kTestTitle,
+        markdownContent: '# Initial',
+        lastSavedContent: '# Initial',
+        lastSavedTitle: kTestTitle,
+        createdAt: DateTime(2025, 5, 20),
+        isNewNote: false,
+      ),
+      act: (bloc) => bloc.add(
+        EditorAutoSaveRequested(
+          content: '# Initial',
+          plainText: 'Initial',
+        ),
+      ),
+      expect: () => [],
+      verify: (_) {
+        verifyNever(() => repository.getNoteById(any()));
+        verifyNever(() => repository.upsertNote(any()));
+      },
+    );
   });
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -1658,13 +1407,11 @@ void main() {
   // ════════════════════════════════════════════════════════════════════════════
 
   group('EditorLoaded.copyWith', () {
-    final base = EditorLoaded(
+    final base = const EditorLoaded(
       noteId: kTestNoteId,
       title: kTestTitle,
-      quillDocument: Document(),
       isContentLoading: false,
       isSaving: false,
-      activeToolbar: EditorToolbar.none,
       isNewNote: false,
     );
 
@@ -1674,7 +1421,6 @@ void main() {
       expect(copy.title, base.title);
       expect(copy.isContentLoading, base.isContentLoading);
       expect(copy.isSaving, base.isSaving);
-      expect(copy.activeToolbar, base.activeToolbar);
       expect(copy.isNewNote, base.isNewNote);
     });
 
@@ -1683,14 +1429,6 @@ void main() {
       expect(copy.title, 'Changed');
       expect(copy.isSaving, true);
       expect(copy.noteId, base.noteId);
-      expect(copy.activeToolbar, base.activeToolbar);
-    });
-
-    test('can set activeToolbar to every enum value', () {
-      for (final t in EditorToolbar.values) {
-        final copy = base.copyWith(activeToolbar: t);
-        expect(copy.activeToolbar, t);
-      }
     });
 
     test('isDirty defaults to false and can be toggled via copyWith', () {
@@ -1699,10 +1437,9 @@ void main() {
       expect(dirty.isDirty, true);
     });
 
-    test('quillDocument can be replaced via copyWith', () {
-      final newDoc = Document();
-      final copy = base.copyWith(quillDocument: newDoc);
-      expect(copy.quillDocument, newDoc);
+    test('markdownContent can be replaced via copyWith', () {
+      final copy = base.copyWith(markdownContent: 'New markdown');
+      expect(copy.markdownContent, 'New markdown');
     });
 
     test('isContentLoading can be toggled via copyWith', () {
@@ -1722,41 +1459,6 @@ void main() {
 
   group('Edge cases', () {
     blocTest<EditorBloc, EditorState>(
-      'title → toolbar toggle → save flows correctly in sequence',
-      build: buildBloc,
-      setUp: () {
-        when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
-        when(() => repository.upsertNote(any())).thenAnswer((_) async {});
-      },
-      seed: () => EditorLoaded(
-        noteId: kTestNoteId,
-        title: '',
-        quillDocument: Document(),
-        isNewNote: true,
-      ),
-      act: (bloc) async {
-        bloc.add(EditorTitleChanged('Chained Title'));
-        bloc.add(EditorToolbarToggled(EditorToolbar.options));
-        bloc.add(
-          EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
-            plainText: kSomePlainText,
-          ),
-        );
-      },
-      expect: () => [
-        isA<EditorLoaded>().having((s) => s.title, 'title', 'Chained Title'),
-        isA<EditorLoaded>().having(
-          (s) => s.activeToolbar,
-          'toolbar',
-          EditorToolbar.options,
-        ),
-        isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
-        isA<EditorSaveSuccess>(),
-      ],
-    );
-
-    blocTest<EditorBloc, EditorState>(
       'auto-save then manual save calls upsertNote on second save',
       build: buildBloc,
       setUp: () {
@@ -1766,17 +1468,16 @@ void main() {
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
         when(() => repository.upsertNote(any())).thenAnswer((_) async {});
       },
-      seed: () => EditorLoaded(
+      seed: () => const EditorLoaded(
         noteId: kTestNoteId,
         title: kTestTitle,
-        quillDocument: Document(),
         isNewNote: true,
       ),
       act: (bloc) async {
         // First: auto-save creates the note
         bloc.add(
           EditorAutoSaveRequested(
-            content: jsonDecode(kSomeDelta),
+            content: kSomeMarkdown,
             plainText: kSomePlainText,
           ),
         );
@@ -1790,7 +1491,7 @@ void main() {
         // Second: manual save — content is same so it discards
         bloc.add(
           EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
+            content: kSomeMarkdown,
             plainText: kSomePlainText,
           ),
         );
@@ -1810,17 +1511,16 @@ void main() {
       },
       act: (bloc) async {
         bloc.emit(
-          EditorLoaded(
+          const EditorLoaded(
             noteId: kTestNoteId,
             title: kTestTitle,
-            quillDocument: Document(),
             isNewNote: true,
           ),
         );
 
         bloc.add(
           EditorSaveRequested(
-            content: jsonDecode(kSomeDelta),
+            content: kSomeMarkdown,
             plainText: kSomePlainText,
           ),
         );
@@ -1844,10 +1544,165 @@ void main() {
       build: buildBloc,
       seed: () => const EditorFailure(ErrorCategory.somethingWentWrong),
       act: (bloc) {
-        bloc.add(EditorTitleChanged('Should be ignored'));
-        bloc.add(EditorToolbarToggled(EditorToolbar.menu));
+        bloc.add(EditorPinToggled());
       },
       expect: () => [],
+    );
+  });
+
+  group('Title and Preview extraction in buildNote', () {
+    blocTest<EditorBloc, EditorState>(
+      'extracts first line as title and remaining lines as previewText',
+      build: buildBloc,
+      setUp: () {
+        when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
+        when(() => repository.upsertNote(any())).thenAnswer((_) async {});
+      },
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
+      act: (bloc) => bloc.add(
+        EditorSaveRequested(
+          content: kSomeMarkdown,
+          plainText:
+              'My Note Title\nThis is the body of my note that provides preview text.',
+        ),
+      ),
+      verify: (_) {
+        final captured = verify(
+          () => repository.upsertNote(captureAny()),
+        ).captured;
+        final note = captured.first as NoteModel;
+        expect(note.title, 'My Note Title');
+        expect(
+          note.previewText,
+          'This is the body of my note that provides preview text.',
+        );
+      },
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'single line note uses that line for title and previewText',
+      build: buildBloc,
+      setUp: () {
+        when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
+        when(() => repository.upsertNote(any())).thenAnswer((_) async {});
+      },
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
+      act: (bloc) => bloc.add(
+        EditorSaveRequested(
+          content: kSomeMarkdown,
+          plainText: 'Single Line Title Only',
+        ),
+      ),
+      verify: (_) {
+        final captured = verify(
+          () => repository.upsertNote(captureAny()),
+        ).captured;
+        final note = captured.first as NoteModel;
+        expect(note.title, 'Single Line Title Only');
+        expect(note.previewText, 'Single Line Title Only');
+      },
+    );
+  });
+
+  group('EditorPinToggled Tests', () {
+    blocTest<EditorBloc, EditorState>(
+      'toggles isPinned in EditorLoaded and calls togglePinNote for existing note',
+      build: buildBloc,
+      setUp: () {
+        when(
+          () => repository.togglePinNote(kTestNoteId),
+        ).thenAnswer((_) async => true);
+      },
+      seed: () => const EditorLoaded(
+        noteId: kTestNoteId,
+        title: kTestTitle,
+        isNewNote: false,
+        isPinned: false,
+      ),
+      act: (bloc) => bloc.add(EditorPinToggled()),
+      expect: () => [
+        isA<EditorLoaded>()
+            .having((s) => s.isPinned, 'isPinned', true)
+            .having((s) => s.isDirty, 'isDirty', true),
+      ],
+      verify: (_) {
+        verify(() => repository.togglePinNote(kTestNoteId)).called(1);
+      },
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'toggles isPinned for new note without calling togglePinNote immediately',
+      build: buildBloc,
+      seed: () => const EditorLoaded(
+        noteId: kTestNoteId,
+        title: '',
+        isNewNote: true,
+        isPinned: false,
+      ),
+      act: (bloc) => bloc.add(EditorPinToggled()),
+      expect: () => [
+        isA<EditorLoaded>()
+            .having((s) => s.isPinned, 'isPinned', true)
+            .having((s) => s.isDirty, 'isDirty', true),
+      ],
+      verify: (_) {
+        verifyNever(() => repository.togglePinNote(any()));
+      },
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'loads existing note with isPinned status set properly',
+      build: buildBloc,
+      setUp: () {
+        when(
+          () => repository.getNoteById(kTestNoteId),
+        ).thenAnswer((_) async => makeNote(isPinned: true));
+      },
+      act: (bloc) => bloc.add(EditorInitialised(noteId: kTestNoteId)),
+      wait: const Duration(milliseconds: 300),
+      expect: () => [
+        isA<EditorLoaded>().having((s) => s.isContentLoading, 'loading', true),
+        isA<EditorLoaded>()
+            .having((s) => s.isPinned, 'isPinned', true)
+            .having((s) => s.isContentLoading, 'loading', false),
+      ],
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'toggling pin sets lastSavedIsPinned so subsequent autosave skips upsertNote when content is unchanged',
+      build: buildBloc,
+      setUp: () {
+        when(() => repository.togglePinNote(kTestNoteId))
+            .thenAnswer((_) async => true);
+      },
+      seed: () => const EditorLoaded(
+        noteId: kTestNoteId,
+        title: kTestTitle,
+        markdownContent: '# Initial',
+        lastSavedContent: '# Initial',
+        lastSavedTitle: kTestTitle,
+        isNewNote: false,
+        isPinned: false,
+        lastSavedIsPinned: false,
+      ),
+      act: (bloc) async {
+        bloc.add(EditorPinToggled());
+        bloc.add(EditorAutoSaveRequested(
+          content: '# Initial',
+          plainText: 'Initial',
+        ));
+      },
+      expect: () => [
+        isA<EditorLoaded>()
+            .having((s) => s.isPinned, 'isPinned', true)
+            .having((s) => s.lastSavedIsPinned, 'lastSavedIsPinned', true),
+      ],
+      verify: (_) {
+        verify(() => repository.togglePinNote(kTestNoteId)).called(1);
+        verifyNever(() => repository.upsertNote(any()));
+      },
     );
   });
 }
