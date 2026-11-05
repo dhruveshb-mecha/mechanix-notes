@@ -6,7 +6,7 @@ import 'package:mechanix_notes/core/utils/icons.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_bloc.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_event.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
-import 'package:mechanix_notes/features/notes/presentation/widgets/home/home_delete_sheet.dart';
+import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_trash_confirmation_sheet.dart';
 import 'package:widgets/widgets.dart';
 
 class HomeNoteCard extends StatelessWidget {
@@ -25,36 +25,34 @@ class HomeNoteCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = note.title.isNotEmpty ? note.title : note.previewText;
-    final supportingText =
-        note.title.isNotEmpty &&
-            note.previewText.isNotEmpty &&
-            note.title != note.previewText
+    final title = note.title.isNotEmpty ? note.title : '';
+    final supportingText = note.previewText.isNotEmpty
         ? note.previewText
         : null;
     final formattedDate = _formatDate(note.updatedAt);
 
-    final Widget? leading;
-    if (note.isPinned) {
-      leading = ImageIcon(
-        const AssetImage(NotesIcon.pinIcon),
-        size: 20,
-        color: context.colorScheme.primary,
-      );
-    } else {
-      leading = null;
-    }
+    final leadingWidgets = [
+      if (note.isPinned)
+        Container(
+          margin: const EdgeInsets.only(right: 4),
+          child: ImageIcon(
+            const AssetImage(NotesIcon.pinIcon),
+            size: 20,
+            color: context.colorScheme.primary,
+          ),
+        ),
+    ];
 
     return MechanixSwipableListTile(
       key: ValueKey('note_tile_${note.id}'),
       variant: ListTileVariant.standard,
       labelText: title,
-      extentRatio: 0.2,
+      extentRatio: 0.23,
       height: 50,
       contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 14),
       supportingText: supportingText,
       trailingText: formattedDate,
-      leading: leading,
+      leadingWidgets: leadingWidgets,
       showLeading: note.isPinned,
       theme: ListTileThemeDataConfig(
         labelStyle: TextStyle(color: context.colorScheme.onSurface),
@@ -82,7 +80,7 @@ class HomeNoteCard extends StatelessWidget {
             color: note.isPinned
                 ? context.colorScheme.primary
                 : context.colorScheme.onSurface,
-            size: 20,
+            size: 18,
           ),
           onPressed: () {
             if (onPin != null) {
@@ -102,23 +100,19 @@ class HomeNoteCard extends StatelessWidget {
           icon: ImageIcon(
             const AssetImage(NotesIcon.trashIcon),
             color: context.colorScheme.error,
-            size: 20,
+            size: 18,
           ),
           onPressed: () {
             if (onDelete != null) {
               onDelete!();
             } else {
-              showModalBottomSheet(
+              EditorTrashConfirmationSheet.show(
                 context: context,
-                backgroundColor: context.colorScheme.surfaceContainer,
-                builder: (sheetContext) => HomeDeleteSheet(
-                  selectedCount: 1,
-                  onDelete: () {
-                    context.read<NotesBloc>().add(
-                      DeleteNotes(noteIds: [note.id]),
-                    );
-                  },
-                ),
+                onConfirm: () {
+                  context.read<NotesBloc>().add(
+                    DeleteNotes(noteIds: [note.id]),
+                  );
+                },
               );
             }
           },

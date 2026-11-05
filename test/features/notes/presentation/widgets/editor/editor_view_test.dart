@@ -17,7 +17,6 @@ class MockNotesBloc extends Mock implements NotesBloc {}
 
 void main() {
   setUpAll(() {
-    registerFallbackValue(RefreshNote(noteId: 'fallback'));
     registerFallbackValue(DeleteNotes(noteIds: const []));
     registerFallbackValue(EditorSaveRequested(content: '', plainText: ''));
   });
@@ -72,7 +71,7 @@ void main() {
     }
 
     testWidgets(
-      'EditorSaveSuccess emits RefreshNote to NotesBloc and pops route',
+      'EditorSaveSuccess pops route without notifying NotesBloc',
       (tester) async {
         final mockObserver = MockNavigatorObserver();
         await tester.pumpWidget(buildTestWidget(observer: mockObserver));
@@ -91,18 +90,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pump(const Duration(milliseconds: 500));
 
-        // Verify RefreshNote was sent
-        verify(
-          () => mockNotesBloc.add(
-            any(
-              that: isA<RefreshNote>().having(
-                (e) => e.noteId,
-                'noteId',
-                'test-note-1',
-              ),
-            ),
-          ),
-        ).called(1);
+        // The notes list updates itself from the repository
+        verifyNever(() => mockNotesBloc.add(any()));
 
         // Verify editor is popped and HomeScreen is visible
         expect(find.byType(EditorView), findsNothing);
@@ -111,7 +100,7 @@ void main() {
     );
 
     testWidgets(
-      'EditorDiscarded with noteId emits RefreshNote and pops route',
+      'EditorDiscarded with noteId pops route without notifying NotesBloc',
       (tester) async {
         final mockObserver = MockNavigatorObserver();
         await tester.pumpWidget(buildTestWidget(observer: mockObserver));
@@ -128,24 +117,14 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pump(const Duration(milliseconds: 500));
 
-        verify(
-          () => mockNotesBloc.add(
-            any(
-              that: isA<RefreshNote>().having(
-                (e) => e.noteId,
-                'noteId',
-                'test-note-1',
-              ),
-            ),
-          ),
-        ).called(1);
+        verifyNever(() => mockNotesBloc.add(any()));
 
         expect(find.byType(EditorView), findsNothing);
       },
     );
 
     testWidgets(
-      'EditorDiscarded without noteId pops route without RefreshNote',
+      'EditorDiscarded without noteId pops route without notifying NotesBloc',
       (tester) async {
         final mockObserver = MockNavigatorObserver();
         await tester.pumpWidget(buildTestWidget(observer: mockObserver));
@@ -162,7 +141,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pump(const Duration(milliseconds: 500));
 
-        verifyNever(() => mockNotesBloc.add(any(that: isA<RefreshNote>())));
+        verifyNever(() => mockNotesBloc.add(any()));
         expect(find.byType(EditorView), findsNothing);
       },
     );

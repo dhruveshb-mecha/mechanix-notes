@@ -1,1524 +1,495 @@
-import 'package:bloc_test/bloc_test.dart';
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:mechanix_notes/core/exceptions/objectbox_exception.dart';
-import 'package:mechanix_notes/core/utils/constants.dart';
 import 'package:mechanix_notes/core/utils/enums.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_bloc.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_event.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_state.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
+import 'package:mechanix_notes/features/notes/data/models/note_model.dart';
 import 'package:mechanix_notes/features/notes/data/models/time_group.dart';
 import 'package:mechanix_notes/features/notes/data/repository/note_repository.dart';
-import 'package:mocktail/mocktail.dart';
 
-class MockNoteRepository extends Mock implements NoteRepository {
-  @override
-  Future<List<NoteMetaData>> getNotes(int skip, int take) async {
-    final dynamic raw = super.noSuchMethod(
-      Invocation.method(#getNotes, [skip, take]),
-    );
-    if (raw == null) {
-      return [];
-    }
-    final List<NoteMetaData> allNotes =
-        await (raw as Future<List<NoteMetaData>>);
+// ---------------------------------------------------------------------------
+// Fake repository: in-memory notes, sorted and watched like the ObjectBox query
+// ---------------------------------------------------------------------------
 
-    var result = allNotes;
-    if (skip < result.length) {
-      result = result.skip(skip).toList();
-    } else {
-      result = [];
+class FakeNoteRepository implements NoteRepository {
+  final Map<String, NoteMetaData> _notes = {};
+  final _changes = StreamController<void>.broadcast();
+  Object? watchError;
+  Object? deleteError;
+  int watchCount = 0;
+  final List<List<String>> deletedBatches = [];
+
+  FakeNoteRepository([Iterable<NoteMetaData> notes = const []]) {
+    for (final n in notes) {
+      _notes[n.id] = n;
     }
-    result = result.take(take).toList();
-    return result;
   }
+
+  List<NoteMetaData> get sorted => _notes.values.toList()
+    ..sort((a, b) {
+      if (a.isPinned != b.isPinned) return a.isPinned ? -1 : 1;
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+
+  List<String> get sortedIds => sorted.map((n) => n.id).toList();
+
+  void save(NoteMetaData note) {
+    _notes[note.id] = note;
+    _changes.add(null);
+  }
+
+  void remove(String id) {
+    _notes.remove(id);
+    _changes.add(null);
+  }
+
+  @override
+  Stream<List<NoteMetaData>> watchNotes() async* {
+    watchCount++;
+    if (watchError != null) throw watchError!;
+    yield sorted;
+    yield* _changes.stream.map((_) => sorted);
+  }
+
+  @override
+  Future<void> deleteNotes(List<String> ids) async {
+    if (deleteError != null) throw deleteError!;
+    deletedBatches.add(ids);
+    ids.forEach(_notes.remove);
+    _changes.add(null);
+  }
+
+  @override
+  Future<bool> togglePinNote(String id) async {
+    final n = _notes[id]!;
+    save(note(n.id, n.updatedAt, pinned: !n.isPinned));
+    return !n.isPinned;
+  }
+
+  @override
+  Future<NoteModel?> getNoteById(String id) async => null;
+
+  @override
+  Future<void> upsertNote(NoteModel note) async {}
+
+  @override
+  Future<List<String>> searchNoteIds(String query) async => [];
+
+  @override
+  Future<List<NoteMetaData>> getNotesMetaData(List<String> ids) async => [];
+
+  @override
+  Future<void> close() async {}
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Creates a [NoteMetaData] with a [updatedAt] offset from now.
-NoteMetaData makeNote({
-  required String id,
-  required DateTime updatedAt,
-  bool isPinned = false,
-}) => NoteMetaData(
-  id: id,
-  updatedAt: updatedAt,
-  title: 'Note $id',
-  height: 0,
-  createdAt: DateTime.now(),
-  previewText: 'Preview $id',
-  isPinned: isPinned,
+final base = DateTime(2026, 10, 26, 12);
+
+NoteMetaData note(String id, DateTime updatedAt, {bool pinned = false}) =>
+    NoteMetaData(
+      id: id,
+      title: 'Note $id',
+      previewText: 'Preview $id',
+      createdAt: updatedAt,
+      updatedAt: updatedAt,
+      height: 0,
+      isPinned: pinned,
+    );
+
+/// [count] notes, n0 newest, each 3 hours older than the previous one.
+List<NoteMetaData> notesSpacedBy3h(int count) => List.generate(
+  count,
+  (i) => note('n$i', base.subtract(Duration(hours: i * 3))),
 );
 
-NoteMetaData pinnedNote(String id) =>
-    makeNote(id: id, updatedAt: now, isPinned: true);
+List<String> visibleIds(NotesBloc bloc) =>
+    bloc.state.groupedNotes.whereType<NoteMetaData>().map((n) => n.id).toList();
 
-/// Returns the list of [NoteMetaData] objects extracted from a flattened list.
-List<NoteMetaData> extractNotes(List<Object> grouped) =>
-    grouped.whereType<NoteMetaData>().toList();
+List<TimeCategory> categories(NotesBloc bloc) => bloc.state.groupedNotes
+    .whereType<TimeGroup>()
+    .map((g) => g.category)
+    .toList();
 
-List<TimeGroup> extractTimeGroups(List<Object> grouped) =>
-    grouped.whereType<TimeGroup>().toList();
+NotesBloc buildBloc(FakeNoteRepository repo, {DateTime Function()? clock}) =>
+    NotesBloc(noteRepository: repo, clock: clock ?? () => base);
 
-/// Returns the [TimeCategory] values of all [TimeGroup]s in a flattened list.
-List<TimeCategory> extractCategories(List<Object> grouped) =>
-    extractTimeGroups(grouped).map((g) => g.category).toList();
-
-/// Returns true when the flattened list contains a [TimeGroup] with the given
-/// [TimeCategory].
-bool hasCategory(List<Object> grouped, TimeCategory category) =>
-    extractCategories(grouped).contains(category);
-
-// ---------------------------------------------------------------------------
-// Test data factories
-// ---------------------------------------------------------------------------
-
-final now = DateTime.now();
-
-final today = DateTime(now.year, now.month, now.day);
-final thisMonthStart = DateTime(now.year, now.month, 1);
-
-NoteMetaData recentNote(String id) =>
-    makeNote(id: id, updatedAt: now.subtract(const Duration(minutes: 10)));
-
-NoteMetaData todayNote(String id) => makeNote(
-  id: id,
-  updatedAt: now.hour >= 2
-      ? DateTime(now.year, now.month, now.day)
-      : now.subtract(const Duration(hours: 3)),
-);
-
-NoteMetaData yesterdayNote(String id) =>
-    makeNote(id: id, updatedAt: today.subtract(const Duration(days: 1)));
-
-/// Exactly 3 calendar days ago — always within the last7Days window (1–7 days).
-NoteMetaData thisWeekNote(String id) =>
-    makeNote(id: id, updatedAt: now.subtract(const Duration(days: 3)));
-
-/// Exactly 6 calendar days ago — still within the bloc's ≤7-day last7Days window.
-NoteMetaData lastWeekNote(String id) =>
-    makeNote(id: id, updatedAt: now.subtract(const Duration(days: 6)));
-
-NoteMetaData thisMonthNote(String id) {
-  final candidate = now.day > 7
-      ? thisMonthStart
-      : now.subtract(const Duration(days: 10));
-  return makeNote(id: id, updatedAt: candidate);
+/// The list on screen must be exactly the notes in the repository, in order,
+/// with no duplicates.
+void expectInSync(NotesBloc bloc, FakeNoteRepository repo) {
+  expect(visibleIds(bloc), repo.sortedIds);
+  expect(bloc.state.notes.map((n) => n.id).toList(), repo.sortedIds);
 }
 
-/// A note exactly 25 days old — always within the lastMonth window (>7 days, ≤30 days).
-NoteMetaData lastMonthNote(String id) =>
-    makeNote(id: id, updatedAt: now.subtract(const Duration(days: 25)));
-
-NoteMetaData olderNote(String id) =>
-    makeNote(id: id, updatedAt: DateTime(now.year - 2, 1, 15));
-
-/// Builds a list of [count] notes all updated recently.
-List<NoteMetaData> buildNoteList(int count) => List.generate(
-  count,
-  (i) => makeNote(
-    id: 'note_$i',
-    updatedAt: now.subtract(Duration(minutes: i + 1)),
-  ),
-);
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 void main() {
-  late MockNoteRepository mockRepo;
+  setUpAll(() => initializeDateFormatting('en'));
 
-  setUp(() {
-    mockRepo = MockNoteRepository();
-    initializeDateFormatting('en');
-  });
+  late FakeNoteRepository repo;
+  late NotesBloc bloc;
 
-  // ── Constructor ──────────────────────────────────────────────────────────
+  tearDown(() => bloc.close());
 
-  group('NotesBloc – constructor', () {
-    test('initial state is default NotesState', () {
-      when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-      final bloc = NotesBloc(noteRepository: mockRepo);
-      expect(bloc.state, const NotesState());
-      bloc.close();
+  group('LoadNotes', () {
+    test('starts loading and subscribes once on creation', () async {
+      repo = FakeNoteRepository(notesSpacedBy3h(3));
+      bloc = buildBloc(repo);
+      expect(bloc.state.isLoading, isTrue);
+
+      await pumpEventQueue();
+
+      expect(repo.watchCount, 1);
+      expect(bloc.state.isLoading, isFalse);
+      expectInSync(bloc, repo);
     });
 
-    test('dispatches LoadNotes on creation', () async {
-      when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-      final bloc = NotesBloc(noteRepository: mockRepo);
-      await bloc.stream.first;
-      verify(() => mockRepo.getNotes(any(), any())).called(1);
-      await bloc.close();
+    test('emits an empty, loaded state when there are no notes', () async {
+      repo = FakeNoteRepository();
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
+
+      expect(bloc.state.isLoading, isFalse);
+      expect(bloc.state.notes, isEmpty);
+      expect(bloc.state.groupedNotes, isEmpty);
+      expect(bloc.state.error, isNull);
+    });
+
+    test('maps a locked store to appAlreadyRunning', () async {
+      repo = FakeNoteRepository()..watchError = ObjectBoxException('locked');
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
+
+      expect(bloc.state.isLoading, isFalse);
+      expect(bloc.state.error, ErrorCategory.appAlreadyRunning);
+    });
+
+    test('maps other errors to failedToLoadNotes', () async {
+      repo = FakeNoteRepository()..watchError = Exception('boom');
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
+
+      expect(bloc.state.error, ErrorCategory.failedToLoadNotes);
+    });
+
+    test('LoadNotes after an error resubscribes and recovers', () async {
+      repo = FakeNoteRepository(notesSpacedBy3h(2))
+        ..watchError = Exception('boom');
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
+      expect(bloc.state.error, ErrorCategory.failedToLoadNotes);
+
+      repo.watchError = null;
+      bloc.add(LoadNotes());
+      await pumpEventQueue();
+
+      expect(repo.watchCount, 2);
+      expect(bloc.state.error, isNull);
+      expectInSync(bloc, repo);
     });
   });
 
-  // ── LoadNotes – success ───────────────────────────────────────────────────
+  group('time groups', () {
+    test('assigns each note to the right group, in order', () async {
+      repo = FakeNoteRepository([
+        note('recent', base.subtract(const Duration(minutes: 30))),
+        note('today', base.subtract(const Duration(hours: 5))),
+        note('yesterday', base.subtract(const Duration(days: 1))),
+        note('week', base.subtract(const Duration(days: 5))),
+        note('month', base.subtract(const Duration(days: 20))),
+        note('older', DateTime(2025, 3, 10)),
+      ]);
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
 
-  group('LoadNotes – success', () {
-    blocTest<NotesBloc, NotesState>(
-      'emits [loading, loaded] with empty list when repository returns nothing',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoading, 'isLoading', true),
-        isA<NotesState>()
-            .having((s) => s.isLoading, 'isLoading', false)
-            .having((s) => s.notes, 'notes', isEmpty)
-            .having((s) => s.groupedNotes, 'groupedNotes', isEmpty)
-            .having((s) => s.hasMore, 'hasMore', false)
-            .having((s) => s.error, 'error', isNull),
-      ],
-    );
+      expect(categories(bloc), [
+        TimeCategory.recent,
+        TimeCategory.today,
+        TimeCategory.yesterday,
+        TimeCategory.last7Days,
+        TimeCategory.lastMonth,
+        TimeCategory.custom,
+      ]);
+      expect(
+        bloc.state.groupedNotes.whereType<TimeGroup>().last.customLabel,
+        'March 2025',
+      );
+    });
 
-    blocTest<NotesBloc, NotesState>(
-      'emits loaded state with correct notes when count ≤ pageSize',
-      build: () {
-        final notes = buildNoteList(5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoading, 'isLoading', true),
-        isA<NotesState>()
-            .having((s) => s.isLoading, 'isLoading', false)
-            .having((s) => s.notes.length, 'notes.length', 5)
-            .having((s) => s.hasMore, 'hasMore', false)
-            .having((s) => s.currentPage, 'currentPage', 0),
-      ],
-    );
+    test('pinned notes come first, once, under a single header', () async {
+      repo = FakeNoteRepository([
+        note('r1', base),
+        note('p1', DateTime(2024, 1, 1), pinned: true),
+        note('p2', base.subtract(const Duration(days: 3)), pinned: true),
+      ]);
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
 
-    blocTest<NotesBloc, NotesState>(
-      'sets hasMore=true when total notes exceed pageSize',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize + 5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoading, 'isLoading', true),
-        isA<NotesState>()
-            .having((s) => s.hasMore, 'hasMore', true)
-            .having((s) => s.notes.length, 'notes.length', Constants.pageSize),
-      ],
-    );
+      expect(
+        bloc.state.groupedNotes.first,
+        const TimeGroup(TimeCategory.pinned),
+      );
+      expect(categories(bloc), [TimeCategory.pinned, TimeCategory.recent]);
+      expect(visibleIds(bloc), ['p2', 'p1', 'r1']);
+    });
 
-    blocTest<NotesBloc, NotesState>(
-      'resets currentPage to 0 on fresh load',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => buildNoteList(3));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>(),
-        isA<NotesState>().having((s) => s.currentPage, 'currentPage', 0),
-      ],
-    );
+    test('counts the notes in each group', () async {
+      repo = FakeNoteRepository([
+        note('p1', base, pinned: true),
+        note('r1', base),
+        note('r2', base.subtract(const Duration(minutes: 30))),
+        note('y1', base.subtract(const Duration(days: 1))),
+      ]);
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
 
-    blocTest<NotesBloc, NotesState>(
-      'clears previous error on successful reload',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(
-        error: ErrorCategory.failedToLoadNotes,
-        isLoading: false,
-        hasMore: false,
-      ),
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>()
-            .having((s) => s.isLoading, 'isLoading', true)
-            .having((s) => s.error, 'error', isNull),
-        isA<NotesState>()
-            .having((s) => s.isLoading, 'isLoading', false)
-            .having((s) => s.error, 'error', isNull),
-      ],
-    );
+      expect(bloc.state.groupCounts, {
+        const TimeGroup(TimeCategory.pinned): 1,
+        const TimeGroup(TimeCategory.recent): 2,
+        const TimeGroup(TimeCategory.yesterday): 1,
+      });
+    });
 
-    blocTest<NotesBloc, NotesState>(
-      'groupedNotes contains exactly pageSize notes when total > pageSize',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize + 10);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        final visibleNotes = extractNotes(bloc.state.groupedNotes);
-        expect(visibleNotes.length, Constants.pageSize);
-      },
-    );
+    test(
+      'groups are recomputed against the clock on the next change',
+      () async {
+        var now = base;
+        repo = FakeNoteRepository([note('a', base)]);
+        bloc = buildBloc(repo, clock: () => now);
+        await pumpEventQueue();
+        expect(categories(bloc), [TimeCategory.recent]);
 
-    blocTest<NotesBloc, NotesState>(
-      'stores only first page of notes in state.notes when total exceeds pageSize',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize + 10);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(bloc.state.notes.length, Constants.pageSize);
+        now = base.add(const Duration(days: 1));
+        repo.save(note('b', now));
+        await pumpEventQueue();
+
+        expect(categories(bloc), [TimeCategory.recent, TimeCategory.yesterday]);
+        expect(visibleIds(bloc), ['b', 'a']);
       },
     );
   });
 
-  // ── LoadNotes – failure ───────────────────────────────────────────────────
+  // The list must match the repository after every kind of change and at every
+  // size. These used to fail with offset pagination (missing notes after
+  // create/edit/delete, stale pin state, duplicates during a page load).
+  for (final count in [10, 20, 1000]) {
+    group('live updates with $count notes', () {
+      setUp(() async {
+        repo = FakeNoteRepository(notesSpacedBy3h(count));
+        bloc = buildBloc(repo);
+        await pumpEventQueue();
+      });
 
-  group('LoadNotes – failure', () {
-    blocTest<NotesBloc, NotesState>(
-      'emits error state when repository throws',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenThrow(Exception('db error'));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoading, 'isLoading', true),
-        isA<NotesState>()
-            .having((s) => s.isLoading, 'isLoading', false)
-            .having((s) => s.error, 'error', isNotNull)
-            .having((s) => s.notes, 'notes', isEmpty),
-      ],
-    );
+      test('shows every note on load', () {
+        expect(bloc.state.notes, hasLength(count));
+        expectInSync(bloc, repo);
+      });
 
-    blocTest<NotesBloc, NotesState>(
-      'emits failedToLoadNotes error category on generic exception',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenThrow(Exception('any'));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>(),
-        isA<NotesState>().having(
-          (s) => s.error,
-          'error',
-          ErrorCategory.failedToLoadNotes,
-        ),
-      ],
-    );
+      test('a new note appears at the top and none go missing', () async {
+        repo.save(note('new', base.add(const Duration(minutes: 1))));
+        await pumpEventQueue();
 
-    blocTest<NotesBloc, NotesState>(
-      'emits appAlreadyRunning error when ObjectBoxException is thrown',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenThrow(ObjectBoxException());
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>(),
-        isA<NotesState>().having(
-          (s) => s.error,
-          'error',
-          ErrorCategory.appAlreadyRunning,
-        ),
-      ],
-    );
+        expect(visibleIds(bloc).first, 'new');
+        expect(bloc.state.notes, hasLength(count + 1));
+        expectInSync(bloc, repo);
+      });
 
-    blocTest<NotesBloc, NotesState>(
-      'notes remain empty after failed load',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenThrow(Exception('any'));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(bloc.state.notes, isEmpty);
-        expect(bloc.state.groupedNotes, isEmpty);
-      },
-    );
-  });
+      test('an edited older note moves to the top', () async {
+        final old = 'n${count - 1}';
+        repo.save(note(old, base.add(const Duration(minutes: 1))));
+        await pumpEventQueue();
 
-  // ── Grouping / time labels ────────────────────────────────────────────────
+        expect(visibleIds(bloc).first, old);
+        expectInSync(bloc, repo);
+      });
 
-  group('_buildFlattenedNotes – time groups', () {
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.recent for a note updated less than 2 hours ago',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [recentNote('r1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
+      test('DeleteNotes removes only the deleted notes', () async {
+        bloc.add(DeleteNotes(noteIds: ['n1', 'n2', 'n3']));
+        await pumpEventQueue();
+
+        expect(bloc.state.notes, hasLength(count - 3));
+        expect(visibleIds(bloc), isNot(contains('n2')));
+        expectInSync(bloc, repo);
+      });
+
+      test('pinning and unpinning an older note updates the list', () async {
+        final old = 'n${count - 1}';
+        bloc.add(TogglePinNote(noteId: old));
+        await pumpEventQueue();
+        expect(visibleIds(bloc).first, old);
+        expect(categories(bloc).first, TimeCategory.pinned);
+
+        // Unpinned elsewhere (e.g. from the editor) without editing it
+        await repo.togglePinNote(old);
+        await pumpEventQueue();
+        expect(categories(bloc), isNot(contains(TimeCategory.pinned)));
+        expect(visibleIds(bloc).last, old);
+        expectInSync(bloc, repo);
+      });
+
+      test('a burst of changes ends in a consistent list', () async {
+        for (var i = 0; i < 5; i++) {
+          repo.save(note('burst$i', base.add(Duration(minutes: i + 1))));
+        }
+        repo.remove('n0');
+        repo.save(note('n5', base.add(const Duration(minutes: 10))));
+        await repo.togglePinNote('n${count - 1}');
+        await pumpEventQueue();
+
         expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.recent),
-          isTrue,
+          visibleIds(bloc).toSet(),
+          hasLength(visibleIds(bloc).length),
+          reason: 'no duplicates',
         );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.today for a note updated earlier today (≥2 h ago)',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [todayNote('t1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.today),
-          isTrue,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.last7Days for a note updated yesterday',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [yesterdayNote('y1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.last7Days),
-          isTrue,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.last7Days for a note from this week',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [thisWeekNote('w1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.last7Days),
-          isTrue,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.last7Days for a note 6 days ago',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [lastWeekNote('lw1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.last7Days),
-          isTrue,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.lastMonth or last7Days for a note from this month start',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [thisMonthNote('tm1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        final categories = extractCategories(bloc.state.groupedNotes);
-        expect(
-          categories.any(
-            (c) => c == TimeCategory.lastMonth || c == TimeCategory.last7Days,
-          ),
-          isTrue,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.lastMonth for a note from last month',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [lastMonthNote('lm1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.lastMonth),
-          isTrue,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'assigns TimeCategory.custom for a note older than 30 days',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [olderNote('o1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.custom),
-          isTrue,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'custom TimeGroup has a non-null customLabel formatted as "MMMM yyyy"',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [olderNote('o1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        final customGroups = extractTimeGroups(
-          bloc.state.groupedNotes,
-        ).where((g) => g.category == TimeCategory.custom).toList();
-        expect(customGroups, isNotEmpty);
-        expect(customGroups.first.customLabel, isNotNull);
-        expect(
-          customGroups.first.customLabel,
-          matches(RegExp(r'^[A-Za-z]+ \d{4}$')),
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'does NOT repeat the same TimeGroup for consecutive notes in the same group',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer(
-          (_) async => [recentNote('r1'), recentNote('r2'), recentNote('r3')],
-        );
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        final groups = extractTimeGroups(bloc.state.groupedNotes);
-        final recentCount = groups
-            .where((g) => g.category == TimeCategory.recent)
-            .length;
-        expect(recentCount, 1);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'inserts a new TimeGroup when the time category changes across notes',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [recentNote('r1'), lastMonthNote('lm1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        final categories = extractCategories(bloc.state.groupedNotes);
-        expect(categories, contains(TimeCategory.recent));
-        expect(categories, contains(TimeCategory.lastMonth));
-        expect(categories.length, 2);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'flattened list alternates TimeGroups and NoteMetaData in correct order',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [recentNote('r1'), lastMonthNote('lm1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        final grouped = bloc.state.groupedNotes;
-        // Expected: [TimeGroup, NoteMetaData, TimeGroup, NoteMetaData]
-        expect(grouped[0], isA<TimeGroup>());
-        expect(grouped[1], isA<NoteMetaData>());
-        expect(grouped[2], isA<TimeGroup>());
-        expect(grouped[3], isA<NoteMetaData>());
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'single note produces exactly one TimeGroup and one NoteMetaData',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [recentNote('r1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(bloc.state.groupedNotes.length, 2);
-        expect(bloc.state.groupedNotes[0], isA<TimeGroup>());
-        expect(bloc.state.groupedNotes[1], isA<NoteMetaData>());
-      },
-    );
-  });
-
-  // ── LoadMoreNotes – success ───────────────────────────────────────────────
-
-  group('LoadMoreNotes – success', () {
-    blocTest<NotesBloc, NotesState>(
-      'sets hasMore=true when total notes exceed pageSize',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize + 5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoading, 'isLoading', true),
-        isA<NotesState>()
-            .having((s) => s.hasMore, 'hasMore', true)
-            .having((s) => s.notes.length, 'notes.length', Constants.pageSize),
-      ],
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'increments currentPage after loading more',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize * 2);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadMoreNotes()),
-      expect: () => [
-        isA<NotesState>(),
-        isA<NotesState>().having((s) => s.currentPage, 'currentPage', 1),
-      ],
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'sets hasMore=true when another full page is available',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize * 2);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadMoreNotes()),
-      expect: () => [
-        isA<NotesState>(),
-        isA<NotesState>().having((s) => s.hasMore, 'hasMore', true),
-      ],
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'does not duplicate the section TimeGroup when new batch is in the same group',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize + 5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadMoreNotes()),
-      verify: (bloc) {
-        final groups = extractTimeGroups(bloc.state.groupedNotes);
-        final recentCount = groups
-            .where((g) => g.category == TimeCategory.recent)
-            .length;
-        expect(recentCount, 1);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'appends new notes to groupedNotes after load more',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize + 5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadMoreNotes()),
-      verify: (bloc) {
-        final visibleNotes = extractNotes(bloc.state.groupedNotes);
-        expect(visibleNotes.length, Constants.pageSize + 5);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'sets hasMore=false when last batch is smaller than pageSize',
-      build: () {
-        // pageSize + 3 means second batch has only 3 notes (< pageSize)
-        final notes = buildNoteList(Constants.pageSize + 3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadMoreNotes()),
-      verify: (bloc) {
-        expect(bloc.state.hasMore, isFalse);
-      },
-    );
-  });
-
-  // ── LoadMoreNotes – no-op conditions ─────────────────────────────────────
-
-  group('LoadMoreNotes – no-op conditions', () {
-    blocTest<NotesBloc, NotesState>(
-      'sets hasMore=true when total notes exceed pageSize',
-      build: () {
-        final notes = buildNoteList(25);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadNotes()),
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoading, 'isLoading', true),
-        isA<NotesState>()
-            .having((s) => s.hasMore, 'hasMore', true)
-            .having((s) => s.notes.length, 'notes.length', Constants.pageSize),
-      ],
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'ignores concurrent LoadMoreNotes while already loading more',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize * 3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) async {
-        bloc.add(LoadMoreNotes());
-        bloc.add(LoadMoreNotes());
-      },
-      verify: (bloc) {
-        expect(bloc.state.currentPage, 2);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'emits hasMore=false and isLoadingMore=false when new batch is empty',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(LoadMoreNotes()),
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoadingMore, 'isLoadingMore', true),
-        isA<NotesState>()
-            .having((s) => s.isLoadingMore, 'isLoadingMore', false)
-            .having((s) => s.hasMore, 'hasMore', false),
-      ],
-    );
-  });
-
-  // ── LoadMoreNotes – failure ───────────────────────────────────────────────
-
-  group('LoadMoreNotes – failure', () {
-    blocTest<NotesBloc, NotesState>(
-      'emits isLoadingMore=false on exception without changing existing notes',
-      build: () {
-        final notes = buildNoteList(Constants.pageSize + 1);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => NotesState(
-        notes: buildNoteList(Constants.pageSize + 1),
-        groupedNotes: [
-          const TimeGroup(TimeCategory.recent),
-          ...buildNoteList(Constants.pageSize),
-        ],
-        isLoading: false,
-        hasMore: true,
-        currentPage: 0,
-      ),
-      skip: 2,
-      act: (bloc) {
-        bloc.add(LoadMoreNotes());
-      },
-      expect: () => [
-        isA<NotesState>().having((s) => s.isLoadingMore, 'isLoadingMore', true),
-        isA<NotesState>().having(
-          (s) => s.isLoadingMore,
-          'isLoadingMore',
-          false,
-        ),
-      ],
-    );
-  });
-
-  // ── RefreshNote ───────────────────────────────────────────────────────────
-
-  group('RefreshNote', () {
-    blocTest<NotesBloc, NotesState>(
-      'moves the refreshed note to the top of state.notes',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(() => mockRepo.getNoteMetaData('note_2')).thenAnswer(
-          (_) async => makeNote(
-            id: 'note_2',
-            updatedAt: now.subtract(const Duration(minutes: 1)),
-          ),
-        );
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(RefreshNote(noteId: 'note_2')),
-      verify: (bloc) {
-        expect(bloc.state.notes.first.id, 'note_2');
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'removes the old entry of the refreshed note from state.notes',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(() => mockRepo.getNoteMetaData('note_1')).thenAnswer(
-          (_) async => makeNote(
-            id: 'note_1',
-            updatedAt: now.subtract(const Duration(minutes: 1)),
-          ),
-        );
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(RefreshNote(noteId: 'note_1')),
-      verify: (bloc) {
-        final ids = bloc.state.notes.map((n) => n.id).toList();
-        expect(ids.where((id) => id == 'note_1').length, 1);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'sets isRefreshed=true after refresh completes',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(() => mockRepo.getNoteMetaData('note_0')).thenAnswer(
-          (_) async => makeNote(
-            id: 'note_0',
-            updatedAt: now.subtract(const Duration(minutes: 1)),
-          ),
-        );
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(RefreshNote(noteId: 'note_0')),
-      verify: (bloc) {
-        expect(bloc.state.isRefreshed, isTrue);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'resets currentPage to 0 after refresh',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(() => mockRepo.getNoteMetaData('note_0')).thenAnswer(
-          (_) async => makeNote(
-            id: 'note_0',
-            updatedAt: now.subtract(const Duration(minutes: 1)),
-          ),
-        );
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => NotesState(
-        notes: buildNoteList(3),
-        groupedNotes: const [],
-        currentPage: 2,
-        hasMore: false,
-      ),
-      skip: 2,
-      act: (bloc) => bloc.add(RefreshNote(noteId: 'note_0')),
-      verify: (bloc) {
-        expect(bloc.state.currentPage, 0);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'does nothing when repository returns null for the note',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(
-          () => mockRepo.getNoteMetaData('missing'),
-        ).thenAnswer((_) async => null);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(RefreshNote(noteId: 'missing')),
-      expect: () => [],
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'does not crash when repository throws during refresh',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(
-          () => mockRepo.getNoteMetaData(any()),
-        ).thenThrow(Exception('fetch error'));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(RefreshNote(noteId: 'note_0')),
-      // Exception is caught; no new state emitted
-      expect: () => [],
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'only refreshes notes in TimeCategory.recent group',
-      build: () {
-        // Note with an old update time goes to lastMonth, not recent
-        final oldNote = lastMonthNote('old_note');
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [oldNote]);
-        when(
-          () => mockRepo.getNoteMetaData('old_note'),
-        ).thenAnswer((_) async => oldNote);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(RefreshNote(noteId: 'old_note')),
-      // Non-recent notes are skipped; no state change
-      expect: () => [],
-    );
-  });
-
-  // ── DeleteNotes ───────────────────────────────────────────────────────────
+        expectInSync(bloc, repo);
+      });
+    });
+  }
 
   group('DeleteNotes', () {
-    blocTest<NotesBloc, NotesState>(
-      'removes deleted note ids from state.notes',
-      build: () {
-        final notes = buildNoteList(5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(
-          () => mockRepo.deleteNotes(['note_0', 'note_1']),
-        ).thenAnswer((_) async {});
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(DeleteNotes(noteIds: ['note_0', 'note_1'])),
-      verify: (bloc) {
-        final ids = bloc.state.notes.map((n) => n.id).toList();
-        expect(ids, isNot(contains('note_0')));
-        expect(ids, isNot(contains('note_1')));
-        expect(ids.length, 3);
-      },
-    );
+    setUp(() async {
+      repo = FakeNoteRepository(notesSpacedBy3h(5));
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
+    });
 
-    blocTest<NotesBloc, NotesState>(
-      'sets isRefreshed=true after deletion',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(() => mockRepo.deleteNotes(any())).thenAnswer((_) async {});
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(DeleteNotes(noteIds: ['note_0'])),
-      verify: (bloc) {
-        expect(bloc.state.isRefreshed, isTrue);
-      },
-    );
+    test('deletes the selected notes when no ids are given', () async {
+      bloc
+        ..add(ToggleNoteSelection(noteId: 'n0'))
+        ..add(ToggleNoteSelection(noteId: 'n1'))
+        ..add(DeleteNotes());
+      await pumpEventQueue();
 
-    blocTest<NotesBloc, NotesState>(
-      'clears selectedNotes after deletion',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(() => mockRepo.deleteNotes(any())).thenAnswer((_) async {});
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => NotesState(
-        notes: buildNoteList(3),
-        groupedNotes: const [],
-        selectedNotes: const ['note_0'],
-        isSelectionMode: true,
-      ),
-      skip: 2,
-      act: (bloc) => bloc.add(DeleteNotes(noteIds: ['note_0'])),
-      verify: (bloc) {
-        expect(bloc.state.selectedNotes, isEmpty);
-        expect(bloc.state.isSelectionMode, isFalse);
-      },
-    );
+      expect(repo.deletedBatches, [
+        ['n0', 'n1'],
+      ]);
+      expect(bloc.state.selectedNotes, isEmpty);
+      expect(bloc.state.isSelectionMode, isFalse);
+      expectInSync(bloc, repo);
+    });
 
-    blocTest<NotesBloc, NotesState>(
-      'uses selectedNotes from state when isSelectionMode is true',
-      build: () {
-        final notes = buildNoteList(5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(
-          () => mockRepo.deleteNotes(['note_0', 'note_1']),
-        ).thenAnswer((_) async {});
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => NotesState(
-        notes: buildNoteList(5),
-        groupedNotes: const [],
-        selectedNotes: const ['note_0', 'note_1'],
-        isSelectionMode: true,
-      ),
-      skip: 2,
-      act: (bloc) =>
-          bloc.add(DeleteNotes()), // no noteIds; should use selectedNotes
-      verify: (bloc) {
-        final ids = bloc.state.notes.map((n) => n.id).toList();
-        expect(ids, isNot(contains('note_0')));
-        expect(ids, isNot(contains('note_1')));
-      },
-    );
+    test('explicit ids win over the current selection', () async {
+      bloc
+        ..add(ToggleNoteSelection(noteId: 'n0'))
+        ..add(DeleteNotes(noteIds: ['n4']));
+      await pumpEventQueue();
 
-    blocTest<NotesBloc, NotesState>(
-      'does nothing when selectedNotes is empty and event.noteIds is null',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(DeleteNotes()),
-      // isRefreshed:false is emitted but deduplicated by Equatable against
-      // the already-false loaded state, so no new state propagates.
-      expect: () => [],
-    );
+      expect(repo.deletedBatches, [
+        ['n4'],
+      ]);
+    });
 
-    blocTest<NotesBloc, NotesState>(
-      'emits failedToDeleteNotes error when repository throws',
-      build: () {
-        final notes = buildNoteList(3);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(
-          () => mockRepo.deleteNotes(any()),
-        ).thenThrow(Exception('db error'));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(DeleteNotes(noteIds: ['note_0'])),
-      verify: (bloc) {
-        expect(bloc.state.error, ErrorCategory.failedToDeleteNotes);
-      },
-    );
+    test('does nothing when there is nothing to delete', () async {
+      bloc.add(DeleteNotes());
+      await pumpEventQueue();
 
-    blocTest<NotesBloc, NotesState>(
-      'resets currentPage to 0 and rebuilds groupedNotes after deletion',
-      build: () {
-        final notes = buildNoteList(5);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => notes);
-        when(() => mockRepo.deleteNotes(any())).thenAnswer((_) async {});
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => NotesState(
-        notes: buildNoteList(5),
-        groupedNotes: const [],
-        currentPage: 2,
-        isSelectionMode: false,
-      ),
-      skip: 2,
-      act: (bloc) => bloc.add(DeleteNotes(noteIds: ['note_0'])),
-      verify: (bloc) {
-        expect(bloc.state.currentPage, 0);
-        expect(bloc.state.groupedNotes, isNotEmpty);
-      },
-    );
+      expect(repo.deletedBatches, isEmpty);
+    });
+
+    test('reports failedToDeleteNotes when the repository throws', () async {
+      repo.deleteError = Exception('disk');
+      bloc.add(DeleteNotes(noteIds: ['n0']));
+      await pumpEventQueue();
+
+      expect(bloc.state.error, ErrorCategory.failedToDeleteNotes);
+    });
   });
 
-  // ── ToggleSelectionMode ───────────────────────────────────────────────────
+  group('selection', () {
+    setUp(() async {
+      repo = FakeNoteRepository(notesSpacedBy3h(30));
+      bloc = buildBloc(repo);
+      await pumpEventQueue();
+    });
 
-  group('ToggleSelectionMode', () {
-    blocTest<NotesBloc, NotesState>(
-      'turns selection mode ON when it was OFF',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(isSelectionMode: false),
-      skip: 2,
-      act: (bloc) => bloc.add(ToggleSelectionMode()),
-      verify: (bloc) {
+    test('ToggleSelectionMode toggles and clears the selection', () async {
+      bloc
+        ..add(ToggleNoteSelection(noteId: 'n0'))
+        ..add(ToggleSelectionMode());
+      await pumpEventQueue();
+
+      expect(bloc.state.isSelectionMode, isFalse);
+      expect(bloc.state.selectedNotes, isEmpty);
+    });
+
+    test(
+      'ToggleNoteSelection adds, removes and enters selection mode',
+      () async {
+        bloc.add(ToggleNoteSelection(noteId: 'n0'));
+        await pumpEventQueue();
+        expect(bloc.state.selectedNotes, ['n0']);
         expect(bloc.state.isSelectionMode, isTrue);
-      },
-    );
 
-    blocTest<NotesBloc, NotesState>(
-      'turns selection mode OFF when it was ON and clears selectedNotes',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(
-        isSelectionMode: true,
-        selectedNotes: ['note_0', 'note_1'],
-      ),
-      skip: 2,
-      act: (bloc) => bloc.add(ToggleSelectionMode()),
-      verify: (bloc) {
-        expect(bloc.state.isSelectionMode, isFalse);
+        bloc.add(ToggleNoteSelection(noteId: 'n0'));
+        await pumpEventQueue();
         expect(bloc.state.selectedNotes, isEmpty);
       },
     );
 
-    blocTest<NotesBloc, NotesState>(
-      'toggling twice returns to the original state',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(isSelectionMode: false),
-      act: (bloc) {
-        bloc.add(ToggleSelectionMode());
-        bloc.add(ToggleSelectionMode());
-      },
-      verify: (bloc) {
-        expect(bloc.state.isSelectionMode, isFalse);
-        expect(bloc.state.selectedNotes, isEmpty);
-      },
-    );
+    test('SelectAllNotes selects every note, then toggles off', () async {
+      bloc.add(SelectAllNotes());
+      await pumpEventQueue();
+      expect(bloc.state.selectedNotes, hasLength(30));
+
+      bloc.add(SelectAllNotes());
+      await pumpEventQueue();
+      expect(bloc.state.selectedNotes, isEmpty);
+      expect(bloc.state.isSelectionMode, isFalse);
+    });
+
+    test('ClearSelection resets selection', () async {
+      bloc
+        ..add(ToggleNoteSelection(noteId: 'n0'))
+        ..add(ClearSelection());
+      await pumpEventQueue();
+
+      expect(bloc.state.selectedNotes, isEmpty);
+      expect(bloc.state.isSelectionMode, isFalse);
+    });
+
+    test('a note deleted elsewhere drops out of the selection', () async {
+      bloc
+        ..add(ToggleNoteSelection(noteId: 'n0'))
+        ..add(ToggleNoteSelection(noteId: 'n1'));
+      await pumpEventQueue();
+
+      repo.remove('n0');
+      await pumpEventQueue();
+
+      expect(bloc.state.selectedNotes, ['n1']);
+    });
   });
-
-  // ── ToggleNoteSelection ───────────────────────────────────────────────────
-
-  group('ToggleNoteSelection', () {
-    blocTest<NotesBloc, NotesState>(
-      'adds a note to selectedNotes when it was not selected',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(isSelectionMode: true, selectedNotes: []),
-      skip: 2,
-      act: (bloc) => bloc.add(ToggleNoteSelection(noteId: 'note_0')),
-      verify: (bloc) {
-        expect(bloc.state.selectedNotes, contains('note_0'));
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'removes a note from selectedNotes when it was already selected',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () =>
-          const NotesState(isSelectionMode: true, selectedNotes: ['note_0']),
-      skip: 2,
-      act: (bloc) => bloc.add(ToggleNoteSelection(noteId: 'note_0')),
-      verify: (bloc) {
-        expect(bloc.state.selectedNotes, isNot(contains('note_0')));
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'activates selection mode when first note is selected',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(isSelectionMode: false, selectedNotes: []),
-      skip: 2,
-      act: (bloc) => bloc.add(ToggleNoteSelection(noteId: 'note_0')),
-      verify: (bloc) {
-        expect(bloc.state.isSelectionMode, isTrue);
-        expect(bloc.state.selectedNotes, contains('note_0'));
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'can select multiple distinct notes',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(isSelectionMode: true, selectedNotes: []),
-      act: (bloc) {
-        bloc.add(ToggleNoteSelection(noteId: 'note_0'));
-        bloc.add(ToggleNoteSelection(noteId: 'note_1'));
-        bloc.add(ToggleNoteSelection(noteId: 'note_2'));
-      },
-      verify: (bloc) {
-        expect(
-          bloc.state.selectedNotes,
-          containsAll(['note_0', 'note_1', 'note_2']),
-        );
-        expect(bloc.state.selectedNotes.length, 3);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'selecting and deselecting the same note leaves selectedNotes empty',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      seed: () => const NotesState(isSelectionMode: true, selectedNotes: []),
-      act: (bloc) {
-        bloc.add(ToggleNoteSelection(noteId: 'note_0'));
-        bloc.add(ToggleNoteSelection(noteId: 'note_0'));
-      },
-      verify: (bloc) {
-        expect(bloc.state.selectedNotes, isEmpty);
-      },
-    );
-  });
-
-  // ── SelectAllNotes ────────────────────────────────────────────────────────
-
-  group('SelectAllNotes', () {
-    blocTest<NotesBloc, NotesState>(
-      'selects all visible (paginated) notes and sets isSelectionMode=true',
-      build: () {
-        // 3 notes — constructor's LoadNotes loads them all into groupedNotes
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => buildNoteList(3));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2, // skip constructor loading + loaded states
-      act: (bloc) => bloc.add(SelectAllNotes()),
-      verify: (bloc) {
-        expect(bloc.state.isSelectionMode, isTrue);
-        expect(bloc.state.selectedNotes.length, 3);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'deselects all notes when all are already selected (toggle off)',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => buildNoteList(3));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) async {
-        // First select all, then select all again to toggle off
-        bloc.add(SelectAllNotes());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(SelectAllNotes());
-      },
-      verify: (bloc) {
-        expect(bloc.state.isSelectionMode, isFalse);
-        expect(bloc.state.selectedNotes, isEmpty);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'selects only notes visible in groupedNotes, not all state.notes',
-      build: () {
-        // pageSize + 5 notes: constructor loads first pageSize into groupedNotes,
-        // remaining 5 stay in state.notes but are not visible yet
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => buildNoteList(Constants.pageSize + 5));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(SelectAllNotes()),
-      verify: (bloc) {
-        // Only the pageSize visible notes should be selected
-        expect(bloc.state.selectedNotes.length, Constants.pageSize);
-      },
-    );
-  });
-
-  // ── ClearSelection ────────────────────────────────────────────────────────
-
-  group('ClearSelection', () {
-    blocTest<NotesBloc, NotesState>(
-      'clears selectedNotes and sets isSelectionMode=false',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => buildNoteList(3));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) async {
-        // Select all first, then clear
-        bloc.add(SelectAllNotes());
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(ClearSelection());
-      },
-      verify: (bloc) {
-        expect(bloc.state.isSelectionMode, isFalse);
-        expect(bloc.state.selectedNotes, isEmpty);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'is a no-op when selection is already empty',
-      build: () {
-        when(() => mockRepo.getNotes(any(), any())).thenAnswer((_) async => []);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) => bloc.add(ClearSelection()),
-      // Already empty selection — Equatable deduplicates the identical state
-      verify: (bloc) {
-        expect(bloc.state.isSelectionMode, isFalse);
-        expect(bloc.state.selectedNotes, isEmpty);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'does not affect notes or groupedNotes',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => buildNoteList(3));
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 2,
-      act: (bloc) async {
-        // Select a note first, then clear — notes/groupedNotes must stay intact
-        bloc.add(ToggleNoteSelection(noteId: 'note_0'));
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(ClearSelection());
-      },
-      verify: (bloc) {
-        expect(bloc.state.notes.length, 3);
-        // groupedNotes = 1 TimeGroup + 3 NoteMetaData
-        expect(bloc.state.groupedNotes.length, 4);
-      },
-    );
-  });
-
-  // ── NotesState: copyWith / equality ──────────────────────────────────────
 
   group('NotesState', () {
-    test('copyWith returns updated copy without mutating original', () {
-      const original = NotesState(currentPage: 0, hasMore: true);
-      final updated = original.copyWith(currentPage: 1, hasMore: false);
-
-      expect(original.currentPage, 0);
-      expect(original.hasMore, true);
-      expect(updated.currentPage, 1);
-      expect(updated.hasMore, false);
+    test('defaults to loading with no notes', () {
+      const state = NotesState();
+      expect(state.isLoading, isTrue);
+      expect(state.notes, isEmpty);
+      expect(state.localized, 'en');
     });
 
-    test('two states with same values are equal (Equatable)', () {
-      const a = NotesState(currentPage: 1, isLoading: false);
-      const b = NotesState(currentPage: 1, isLoading: false);
-      expect(a, equals(b));
-    });
+    test('copyWith keeps unspecified fields and clears error', () {
+      const state = NotesState(
+        isLoading: false,
+        error: ErrorCategory.failedToLoadNotes,
+        selectedNotes: ['a'],
+      );
+      final copy = state.copyWith(isSelectionMode: true);
 
-    test('pageSize constant is 20', () {
-      expect(Constants.pageSize, 20);
-    });
-
-    test('default localized is "en"', () {
-      expect(const NotesState().localized, 'en');
-    });
-
-    test('copyWith with no arguments returns an equal state', () {
-      const state = NotesState(currentPage: 3, isLoading: true, hasMore: true);
-      // error is always null in copyWith when not supplied — known behaviour
-      final copy = state.copyWith();
-      expect(copy.currentPage, state.currentPage);
-      expect(copy.isLoading, state.isLoading);
-      expect(copy.hasMore, state.hasMore);
-    });
-
-    test('isRefreshed defaults to false in copyWith when not supplied', () {
-      // copyWith always sets isRefreshed to false when not provided
-      const state = NotesState(isRefreshed: true);
-      final copy = state.copyWith();
-      expect(copy.isRefreshed, isFalse);
-    });
-
-    test('error is always cleared in copyWith when not provided', () {
-      // The copyWith implementation passes `error` directly (not ??),
-      // so omitting it resets to null — document this behaviour.
-      const state = NotesState(error: ErrorCategory.failedToLoadNotes);
-      final copy = state.copyWith(); // no error argument
+      expect(copy.isLoading, isFalse);
+      expect(copy.selectedNotes, ['a']);
+      expect(copy.isSelectionMode, isTrue);
       expect(copy.error, isNull);
     });
 
-    test('copyWith preserves selectedNotes when not overridden', () {
-      const state = NotesState(selectedNotes: ['a', 'b']);
-      final copy = state.copyWith(currentPage: 1);
-      expect(copy.selectedNotes, ['a', 'b']);
+    test('states with equal values are equal', () {
+      expect(const NotesState(), const NotesState());
+      expect(const NotesState(), isNot(const NotesState(isLoading: false)));
     });
-
-    test('two states with different currentPage are not equal', () {
-      const a = NotesState(currentPage: 0);
-      const b = NotesState(currentPage: 1);
-      expect(a, isNot(equals(b)));
-    });
-  });
-
-  group('Pinned Notes Tests', () {
-    blocTest<NotesBloc, NotesState>(
-      'places TimeCategory.pinned at top when pinned notes are present',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [pinnedNote('p1'), recentNote('r1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        expect(
-          hasCategory(bloc.state.groupedNotes, TimeCategory.pinned),
-          isTrue,
-        );
-        expect(
-          extractCategories(bloc.state.groupedNotes).first,
-          TimeCategory.pinned,
-        );
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'TogglePinNote calls repository.togglePinNote and reloads notes',
-      build: () {
-        when(() => mockRepo.togglePinNote('p1')).thenAnswer((_) async => true);
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [pinnedNote('p1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      act: (bloc) => bloc.add(TogglePinNote(noteId: 'p1')),
-      verify: (bloc) {
-        verify(() => mockRepo.togglePinNote('p1')).called(1);
-      },
-    );
-
-    blocTest<NotesBloc, NotesState>(
-      'pinned note appears in both Pinned section and its chronological time section',
-      build: () {
-        when(
-          () => mockRepo.getNotes(any(), any()),
-        ).thenAnswer((_) async => [pinnedNote('p1'), recentNote('r1')]);
-        return NotesBloc(noteRepository: mockRepo);
-      },
-      skip: 1,
-      act: (bloc) => bloc.add(LoadNotes()),
-      verify: (bloc) {
-        final grouped = bloc.state.groupedNotes;
-        expect(extractCategories(grouped).first, TimeCategory.pinned);
-
-        final p1Instances = grouped
-            .whereType<NoteMetaData>()
-            .where((n) => n.id == 'p1')
-            .toList();
-        expect(p1Instances.length, equals(2));
-
-        final r1Instances = grouped
-            .whereType<NoteMetaData>()
-            .where((n) => n.id == 'r1')
-            .toList();
-        expect(r1Instances.length, equals(1));
-      },
-    );
   });
 }

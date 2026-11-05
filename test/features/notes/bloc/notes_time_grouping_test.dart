@@ -50,8 +50,8 @@ void main() {
         );
 
         when(
-          () => repository.getNotes(any(), any()),
-        ).thenAnswer((_) async => [note]);
+          () => repository.watchNotes(),
+        ).thenAnswer((_) => Stream.value([note]));
 
         final bloc = NotesBloc(
           noteRepository: repository,
@@ -82,8 +82,8 @@ void main() {
         );
 
         when(
-          () => repository.getNotes(any(), any()),
-        ).thenAnswer((_) async => [note1]);
+          () => repository.watchNotes(),
+        ).thenAnswer((_) => Stream.value([note1]));
 
         final bloc = NotesBloc(
           noteRepository: repository,
@@ -113,8 +113,8 @@ void main() {
       );
 
       when(
-        () => repository.getNotes(any(), any()),
-      ).thenAnswer((_) async => [note]);
+        () => repository.watchNotes(),
+      ).thenAnswer((_) => Stream.value([note]));
 
       final bloc = NotesBloc(noteRepository: repository, clock: () => fakeNow);
 
@@ -141,8 +141,8 @@ void main() {
         );
 
         when(
-          () => repository.getNotes(any(), any()),
-        ).thenAnswer((_) async => [note]);
+          () => repository.watchNotes(),
+        ).thenAnswer((_) => Stream.value([note]));
 
         final bloc = NotesBloc(
           noteRepository: repository,
@@ -179,8 +179,8 @@ void main() {
         );
 
         when(
-          () => repository.getNotes(any(), any()),
-        ).thenAnswer((_) async => [note7Days, note8Days]);
+          () => repository.watchNotes(),
+        ).thenAnswer((_) => Stream.value([note7Days, note8Days]));
 
         final bloc = NotesBloc(
           noteRepository: repository,
@@ -222,8 +222,8 @@ void main() {
         );
 
         when(
-          () => repository.getNotes(any(), any()),
-        ).thenAnswer((_) async => [note30Days, note31Days]);
+          () => repository.watchNotes(),
+        ).thenAnswer((_) => Stream.value([note30Days, note31Days]));
 
         final bloc = NotesBloc(
           noteRepository: repository,
@@ -255,7 +255,7 @@ void main() {
     );
 
     test(
-      'year transition: note from Dec 31 2025 viewed on Jan 1 2026 > 2 hours ago is last7Days',
+      'year transition: note from Dec 31 2025 viewed on Jan 1 2026 > 2 hours ago is yesterday',
       () async {
         final fakeNow = DateTime(2026, 1, 1, 12, 0, 0);
         final noteDec31 = createNote(
@@ -264,8 +264,8 @@ void main() {
         );
 
         when(
-          () => repository.getNotes(any(), any()),
-        ).thenAnswer((_) async => [noteDec31]);
+          () => repository.watchNotes(),
+        ).thenAnswer((_) => Stream.value([noteDec31]));
 
         final bloc = NotesBloc(
           noteRepository: repository,
@@ -280,7 +280,7 @@ void main() {
               (s) => s.groupedNotes,
               'groupedNotes',
               containsAllInOrder([
-                const TimeGroup(TimeCategory.last7Days),
+                const TimeGroup(TimeCategory.yesterday),
                 noteDec31,
               ]),
             ),

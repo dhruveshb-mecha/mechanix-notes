@@ -11,7 +11,10 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
 
   SearchBloc({required this.noteRepository}) : super(const SearchState()) {
     on<SearchQueryChanged>(_onSearchQueryChanged, transformer: restartable());
-    on<LoadMoreSearchResults>(_onLoadMoreSearchResults);
+    on<LoadMoreSearchResults>(
+      _onLoadMoreSearchResults,
+      transformer: droppable(),
+    );
     on<ClearSearch>(_onClearSearch);
   }
 
@@ -35,19 +38,17 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     AppLogger.i("Searching notes for query: $query");
 
     try {
-      final filteredNotes = await noteRepository.searchNotes(query);
+      final ids = await noteRepository.searchNoteIds(query);
+      final firstPage = await noteRepository.getNotesMetaData(_pageIds(ids, 0));
 
-      final firstPage = filteredNotes.take(Constants.pageSize).toList();
-      final hasMore = filteredNotes.length > Constants.pageSize;
-
-      AppLogger.i("Found ${filteredNotes.length} matching notes");
+      AppLogger.i("Found ${ids.length} matching notes");
 
       emit(
         state.copyWith(
           status: SearchStatus.success,
           results: firstPage,
-          allFilteredNotes: filteredNotes,
-          hasMore: hasMore,
+          resultIds: ids,
+          hasMore: ids.length > Constants.pageSize,
           currentPage: 0,
           isLoadingMore: false,
         ),
@@ -65,34 +66,41 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     if (state.isLoadingMore || !state.hasMore) return;
 
     AppLogger.i("Loading more search results");
+    final ids = state.resultIds;
+    final nextPage = state.currentPage + 1;
+    final pageIds = _pageIds(ids, nextPage);
+
+    if (pageIds.isEmpty) {
+      emit(state.copyWith(hasMore: false));
+      return;
+    }
+
     emit(state.copyWith(isLoadingMore: true));
 
     try {
-      final currentCount = state.results.length;
-      final newBatch = state.allFilteredNotes
-          .skip(currentCount)
-          .take(Constants.pageSize)
-          .toList();
+      final newBatch = await noteRepository.getNotesMetaData(pageIds);
 
-      if (newBatch.isEmpty) {
-        emit(state.copyWith(isLoadingMore: false, hasMore: false));
-        return;
-      }
+      if (_isStale(ids)) return;
 
       emit(
         state.copyWith(
           results: [...state.results, ...newBatch],
           isLoadingMore: false,
-          hasMore:
-              (currentCount + newBatch.length) < state.allFilteredNotes.length,
-          currentPage: state.currentPage + 1,
+          hasMore: (nextPage + 1) * Constants.pageSize < ids.length,
+          currentPage: nextPage,
         ),
       );
     } catch (e) {
       AppLogger.e("Error loading more search results: $e");
-      emit(state.copyWith(isLoadingMore: false));
+      if (!_isStale(ids)) emit(state.copyWith(isLoadingMore: false));
     }
   }
+
+  bool _isStale(List<String> ids) =>
+      state.status != SearchStatus.success || !identical(state.resultIds, ids);
+
+  static List<String> _pageIds(List<String> ids, int page) =>
+      ids.skip(page * Constants.pageSize).take(Constants.pageSize).toList();
 
   void _onClearSearch(ClearSearch event, Emitter<SearchState> emit) {
     emit(const SearchState());

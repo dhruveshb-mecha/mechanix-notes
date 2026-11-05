@@ -10,12 +10,16 @@ class HomeGroupHeader extends StatelessWidget {
     required this.group,
     this.count,
     this.isFirst = false,
+    this.initiallyExpanded = true,
+    this.onExpansionChanged,
     this.children = const <Widget>[],
   });
 
   final TimeGroup group;
   final int? count;
   final bool isFirst;
+  final bool initiallyExpanded;
+  final ValueChanged<bool>? onExpansionChanged;
   final List<Widget> children;
 
   @override
@@ -27,7 +31,7 @@ class HomeGroupHeader extends StatelessWidget {
 
     return MechanixExpandableListTile(
       key: ValueKey('tile_${group.category}_${group.customLabel}'),
-      expandedContentGap: 12,
+      expandedContentGap: 0,
       label: SizedBox(
         height: 50,
         child: Column(
@@ -70,7 +74,8 @@ class HomeGroupHeader extends StatelessWidget {
       showAccordionButton: false,
       backgroundColor: context.colorScheme.surfaceContainerLowest,
       contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 0),
-      initiallyExpanded: true,
+      initiallyExpanded: initiallyExpanded,
+      onExpansionChanged: onExpansionChanged,
       childrenPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
       children: children,
     );

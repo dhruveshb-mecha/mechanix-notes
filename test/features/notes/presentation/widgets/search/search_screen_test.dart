@@ -73,7 +73,7 @@ void main() {
       'renders search text field initially focused and in clean state',
       (tester) async {
         when(
-          () => mockRepository.searchNotes(any()),
+          () => mockRepository.searchNoteIds(any()),
         ).thenAnswer((_) async => []);
 
         await tester.pumpWidget(buildAppWithRepository());
@@ -94,7 +94,10 @@ void main() {
           preview: 'Milk, Eggs',
         );
         when(
-          () => mockRepository.searchNotes('Groceries'),
+          () => mockRepository.searchNoteIds('Groceries'),
+        ).thenAnswer((_) async => [note.id]);
+        when(
+          () => mockRepository.getNotesMetaData([note.id]),
         ).thenAnswer((_) async => [note]);
 
         await tester.pumpWidget(buildAppWithRepository());
@@ -107,7 +110,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
         await tester.pumpAndSettle();
 
-        verify(() => mockRepository.searchNotes('Groceries')).called(1);
+        verify(() => mockRepository.searchNoteIds('Groceries')).called(1);
         expect(find.text('Buy Groceries'), findsOneWidget);
       },
     );

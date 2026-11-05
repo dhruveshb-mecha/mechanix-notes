@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mechanix_notes/core/utils/constants.dart';
@@ -27,11 +29,14 @@ NoteMetaData makeNote({required String id, String title = 'Note'}) =>
 List<NoteMetaData> buildNoteList(int count) =>
     List.generate(count, (i) => makeNote(id: 'note_$i', title: 'Note $i'));
 
+List<String> idsOf(List<NoteMetaData> notes) =>
+    notes.map((n) => n.id).toList();
+
 Matcher stateMatching({
   SearchStatus? status,
   String? query,
   int? resultsLength,
-  int? allFilteredLength,
+  int? idsLength,
   bool? hasMore,
   int? currentPage,
   bool? isLoadingMore,
@@ -42,8 +47,8 @@ Matcher stateMatching({
     if (resultsLength != null && s.results.length != resultsLength) {
       return false;
     }
-    if (allFilteredLength != null &&
-        s.allFilteredNotes.length != allFilteredLength) {
+    if (idsLength != null &&
+        s.resultIds.length != idsLength) {
       return false;
     }
     if (hasMore != null && s.hasMore != hasMore) return false;
@@ -60,8 +65,18 @@ Matcher stateMatching({
 void main() {
   late MockNoteRepository mockRepo;
 
+  setUpAll(() {
+    registerFallbackValue(<String>[]);
+  });
+
   setUp(() {
     mockRepo = MockNoteRepository();
+    when(() => mockRepo.getNotesMetaData(any())).thenAnswer(
+      (invocation) async => [
+        for (final id in invocation.positionalArguments.first as List<String>)
+          makeNote(id: id),
+      ],
+    );
   });
 
   SearchBloc buildBloc() => SearchBloc(noteRepository: mockRepo);
@@ -108,7 +123,7 @@ void main() {
       act: (bloc) => bloc.add(SearchQueryChanged(query: '')),
       expect: () => [const SearchState()],
       verify: (_) {
-        verifyNever(() => mockRepo.searchNotes(any()));
+        verifyNever(() => mockRepo.searchNoteIds(any()));
       },
     );
 
@@ -118,7 +133,7 @@ void main() {
       act: (bloc) => bloc.add(SearchQueryChanged(query: '   ')),
       expect: () => [const SearchState()],
       verify: (_) {
-        verifyNever(() => mockRepo.searchNotes(any()));
+        verifyNever(() => mockRepo.searchNoteIds(any()));
       },
     );
 
@@ -128,7 +143,7 @@ void main() {
       act: (bloc) => bloc.add(SearchQueryChanged(query: '\t\n  \n')),
       expect: () => [const SearchState()],
       verify: (_) {
-        verifyNever(() => mockRepo.searchNotes(any()));
+        verifyNever(() => mockRepo.searchNoteIds(any()));
       },
     );
 
@@ -139,7 +154,7 @@ void main() {
         status: SearchStatus.success,
         query: 'old',
         results: buildNoteList(5),
-        allFilteredNotes: buildNoteList(5),
+        resultIds: idsOf(buildNoteList(5)),
         hasMore: true,
         currentPage: 2,
         isLoadingMore: false,
@@ -165,7 +180,9 @@ void main() {
       'emits [loading, success] with matching results',
       build: () {
         final notes = buildNoteList(3);
-        when(() => mockRepo.searchNotes('test')).thenAnswer((_) async => notes);
+        when(
+          () => mockRepo.searchNoteIds('test'),
+        ).thenAnswer((_) async => idsOf(notes));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'test')),
@@ -174,27 +191,29 @@ void main() {
           status: SearchStatus.loading,
           query: 'test',
           resultsLength: 0,
-          allFilteredLength: 0,
+          idsLength: 0,
         ),
         stateMatching(
           status: SearchStatus.success,
           query: 'test',
           resultsLength: 3,
-          allFilteredLength: 3,
+          idsLength: 3,
           hasMore: false,
           currentPage: 0,
           isLoadingMore: false,
         ),
       ],
       verify: (_) {
-        verify(() => mockRepo.searchNotes('test')).called(1);
+        verify(() => mockRepo.searchNoteIds('test')).called(1);
       },
     );
 
     blocTest<SearchBloc, SearchState>(
       'emits success with empty results when repository returns nothing',
       build: () {
-        when(() => mockRepo.searchNotes('none')).thenAnswer((_) async => []);
+        when(
+          () => mockRepo.searchNoteIds('none'),
+        ).thenAnswer((_) async => idsOf([]));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'none')),
@@ -204,7 +223,7 @@ void main() {
           status: SearchStatus.success,
           query: 'none',
           resultsLength: 0,
-          allFilteredLength: 0,
+          idsLength: 0,
           hasMore: false,
           currentPage: 0,
         ),
@@ -214,7 +233,9 @@ void main() {
     blocTest<SearchBloc, SearchState>(
       'trims query before calling repository',
       build: () {
-        when(() => mockRepo.searchNotes('hello')).thenAnswer((_) async => []);
+        when(
+          () => mockRepo.searchNoteIds('hello'),
+        ).thenAnswer((_) async => idsOf([]));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: '  hello  ')),
@@ -223,7 +244,7 @@ void main() {
         stateMatching(status: SearchStatus.success, query: 'hello'),
       ],
       verify: (_) {
-        verify(() => mockRepo.searchNotes('hello')).called(1);
+        verify(() => mockRepo.searchNoteIds('hello')).called(1);
       },
     );
 
@@ -232,8 +253,8 @@ void main() {
       build: () {
         final notes = buildNoteList(Constants.pageSize);
         when(
-          () => mockRepo.searchNotes('exact'),
-        ).thenAnswer((_) async => notes);
+          () => mockRepo.searchNoteIds('exact'),
+        ).thenAnswer((_) async => idsOf(notes));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'exact')),
@@ -242,7 +263,7 @@ void main() {
         stateMatching(
           status: SearchStatus.success,
           resultsLength: Constants.pageSize,
-          allFilteredLength: Constants.pageSize,
+          idsLength: Constants.pageSize,
           hasMore: false,
         ),
       ],
@@ -253,8 +274,8 @@ void main() {
       build: () {
         final notes = buildNoteList(Constants.pageSize + 1);
         when(
-          () => mockRepo.searchNotes('plusone'),
-        ).thenAnswer((_) async => notes);
+          () => mockRepo.searchNoteIds('plusone'),
+        ).thenAnswer((_) async => idsOf(notes));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'plusone')),
@@ -263,7 +284,7 @@ void main() {
         stateMatching(
           status: SearchStatus.success,
           resultsLength: Constants.pageSize,
-          allFilteredLength: Constants.pageSize + 1,
+          idsLength: Constants.pageSize + 1,
           hasMore: true,
         ),
       ],
@@ -273,7 +294,9 @@ void main() {
       'sets hasMore=true when total results exceed pageSize',
       build: () {
         final notes = buildNoteList(Constants.pageSize + 5);
-        when(() => mockRepo.searchNotes('query')).thenAnswer((_) async => notes);
+        when(
+          () => mockRepo.searchNoteIds('query'),
+        ).thenAnswer((_) async => idsOf(notes));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'query')),
@@ -282,7 +305,7 @@ void main() {
         stateMatching(
           status: SearchStatus.success,
           resultsLength: Constants.pageSize,
-          allFilteredLength: Constants.pageSize + 5,
+          idsLength: Constants.pageSize + 5,
           hasMore: true,
         ),
       ],
@@ -292,7 +315,9 @@ void main() {
       'first page contains the first pageSize notes from repository',
       build: () {
         final notes = buildNoteList(Constants.pageSize + 2);
-        when(() => mockRepo.searchNotes('ids')).thenAnswer((_) async => notes);
+        when(
+          () => mockRepo.searchNoteIds('ids'),
+        ).thenAnswer((_) async => idsOf(notes));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'ids')),
@@ -308,22 +333,22 @@ void main() {
       'replaces previous search results on a new successful query',
       build: () {
         when(
-          () => mockRepo.searchNotes('new'),
-        ).thenAnswer((_) async => [makeNote(id: 'fresh')]);
+          () => mockRepo.searchNoteIds('new'),
+        ).thenAnswer((_) async => idsOf([makeNote(id: 'fresh')]));
         return buildBloc();
       },
       seed: () => SearchState(
         status: SearchStatus.success,
         query: 'old',
         results: buildNoteList(3),
-        allFilteredNotes: buildNoteList(3),
+        resultIds: idsOf(buildNoteList(3)),
         hasMore: false,
         currentPage: 1,
       ),
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'new')),
       verify: (bloc) {
         expect(bloc.state.results.single.id, 'fresh');
-        expect(bloc.state.allFilteredNotes.single.id, 'fresh');
+        expect(bloc.state.resultIds.single, 'fresh');
         expect(bloc.state.query, 'new');
       },
     );
@@ -331,7 +356,9 @@ void main() {
     blocTest<SearchBloc, SearchState>(
       'resets currentPage to 0 on a fresh search',
       build: () {
-        when(() => mockRepo.searchNotes('new')).thenAnswer((_) async => []);
+        when(
+          () => mockRepo.searchNoteIds('new'),
+        ).thenAnswer((_) async => idsOf([]));
         return buildBloc();
       },
       seed: () => const SearchState(
@@ -347,9 +374,9 @@ void main() {
     blocTest<SearchBloc, SearchState>(
       'emits loading before repository returns',
       build: () {
-        when(() => mockRepo.searchNotes('slow')).thenAnswer((_) async {
+        when(() => mockRepo.searchNoteIds('slow')).thenAnswer((_) async {
           await Future<void>.delayed(const Duration(milliseconds: 50));
-          return buildNoteList(1);
+          return idsOf(buildNoteList(1));
         });
         return buildBloc();
       },
@@ -365,8 +392,8 @@ void main() {
       'recovers to success after a previous failure',
       build: () {
         when(
-          () => mockRepo.searchNotes('okay'),
-        ).thenAnswer((_) async => buildNoteList(2));
+          () => mockRepo.searchNoteIds('okay'),
+        ).thenAnswer((_) async => idsOf(buildNoteList(2)));
         return buildBloc();
       },
       seed: () =>
@@ -385,7 +412,9 @@ void main() {
     blocTest<SearchBloc, SearchState>(
       'resets isLoadingMore on a fresh search',
       build: () {
-        when(() => mockRepo.searchNotes('query')).thenAnswer((_) async => []);
+        when(
+          () => mockRepo.searchNoteIds('query'),
+        ).thenAnswer((_) async => idsOf([]));
         return buildBloc();
       },
       seed: () =>
@@ -401,7 +430,7 @@ void main() {
       'resets isLoadingMore when search fails',
       build: () {
         when(
-          () => mockRepo.searchNotes('fail'),
+          () => mockRepo.searchNoteIds('fail'),
         ).thenThrow(Exception('db error'));
         return buildBloc();
       },
@@ -422,7 +451,7 @@ void main() {
       'emits [loading, failure] when repository throws',
       build: () {
         when(
-          () => mockRepo.searchNotes('fail'),
+          () => mockRepo.searchNoteIds('fail'),
         ).thenThrow(Exception('db error'));
         return buildBloc();
       },
@@ -437,7 +466,7 @@ void main() {
       'keeps query from the failed search attempt',
       build: () {
         when(
-          () => mockRepo.searchNotes('fail'),
+          () => mockRepo.searchNoteIds('fail'),
         ).thenThrow(Exception('db error'));
         return buildBloc();
       },
@@ -451,7 +480,7 @@ void main() {
       'preserves stale results from prior success when new search fails',
       build: () {
         when(
-          () => mockRepo.searchNotes('fail'),
+          () => mockRepo.searchNoteIds('fail'),
         ).thenThrow(Exception('db error'));
         return buildBloc();
       },
@@ -459,7 +488,7 @@ void main() {
         status: SearchStatus.success,
         query: 'old',
         results: buildNoteList(4),
-        allFilteredNotes: buildNoteList(4),
+        resultIds: idsOf(buildNoteList(4)),
       ),
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'fail')),
       verify: (bloc) {
@@ -473,13 +502,13 @@ void main() {
       'does not call repository again after failure without a new event',
       build: () {
         when(
-          () => mockRepo.searchNotes('fail'),
+          () => mockRepo.searchNoteIds('fail'),
         ).thenThrow(Exception('db error'));
         return buildBloc();
       },
       act: (bloc) => bloc.add(SearchQueryChanged(query: 'fail')),
       verify: (_) {
-        verify(() => mockRepo.searchNotes('fail')).called(1);
+        verify(() => mockRepo.searchNoteIds('fail')).called(1);
       },
     );
   });
@@ -496,7 +525,7 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all.take(Constants.pageSize).toList(),
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: true,
         );
       },
@@ -521,7 +550,7 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all.take(Constants.pageSize).toList(),
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: true,
         );
       },
@@ -543,7 +572,7 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all.take(Constants.pageSize).toList(),
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: true,
         );
       },
@@ -563,7 +592,7 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all.take(Constants.pageSize).toList(),
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: true,
         );
       },
@@ -587,7 +616,7 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all.take(Constants.pageSize).toList(),
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: true,
         );
       },
@@ -613,7 +642,7 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all.take(Constants.pageSize).toList(),
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: true,
         );
       },
@@ -626,11 +655,127 @@ void main() {
     );
   });
 
+  // ── Page hydration ───────────────────────────────────────────────────────
+
+  group('Page hydration', () {
+    blocTest<SearchBloc, SearchState>(
+      'search hydrates only the first page of matching ids',
+      build: () {
+        when(
+          () => mockRepo.searchNoteIds('many'),
+        ).thenAnswer((_) async => idsOf(buildNoteList(1000)));
+        return buildBloc();
+      },
+      act: (bloc) => bloc.add(SearchQueryChanged(query: 'many')),
+      verify: (bloc) {
+        final requested =
+            verify(
+                  () => mockRepo.getNotesMetaData(captureAny()),
+                ).captured.single
+                as List<String>;
+        expect(requested, idsOf(buildNoteList(Constants.pageSize)));
+        expect(bloc.state.resultIds, hasLength(1000));
+        expect(bloc.state.results, hasLength(Constants.pageSize));
+      },
+    );
+
+    blocTest<SearchBloc, SearchState>(
+      'load more hydrates exactly the next page of ids',
+      build: buildBloc,
+      seed: () {
+        final all = buildNoteList(Constants.pageSize * 3);
+        return SearchState(
+          status: SearchStatus.success,
+          query: 'query',
+          results: all.take(Constants.pageSize).toList(),
+          resultIds: idsOf(all),
+          hasMore: true,
+        );
+      },
+      act: (bloc) => bloc.add(LoadMoreSearchResults()),
+      verify: (_) {
+        final requested =
+            verify(
+                  () => mockRepo.getNotesMetaData(captureAny()),
+                ).captured.single
+                as List<String>;
+        expect(requested.first, 'note_${Constants.pageSize}');
+        expect(requested.last, 'note_${Constants.pageSize * 2 - 1}');
+      },
+    );
+
+    blocTest<SearchBloc, SearchState>(
+      'counts pages by ids so missing notes do not shift later pages',
+      build: () {
+        // Every note in the second page is missing from the database
+        when(() => mockRepo.getNotesMetaData(any())).thenAnswer((_) async => []);
+        return buildBloc();
+      },
+      seed: () {
+        final all = buildNoteList(Constants.pageSize * 3);
+        return SearchState(
+          status: SearchStatus.success,
+          query: 'query',
+          results: all.take(Constants.pageSize).toList(),
+          resultIds: idsOf(all),
+          hasMore: true,
+        );
+      },
+      act: (bloc) => bloc.add(LoadMoreSearchResults()),
+      verify: (bloc) {
+        expect(bloc.state.results, hasLength(Constants.pageSize));
+        expect(bloc.state.currentPage, 1);
+        expect(bloc.state.hasMore, isTrue);
+      },
+    );
+
+    blocTest<SearchBloc, SearchState>(
+      'drops a load-more page that resolves after a new search started',
+      build: () {
+        final pendingPage = Completer<List<NoteMetaData>>();
+        when(
+          () => mockRepo.getNotesMetaData(any(that: isNotEmpty)),
+        ).thenAnswer((_) => pendingPage.future);
+        when(() => mockRepo.searchNoteIds('next')).thenAnswer((_) async {
+          pendingPage.complete([makeNote(id: 'stale')]);
+          return [];
+        });
+        return buildBloc();
+      },
+      seed: () {
+        final all = buildNoteList(Constants.pageSize * 2);
+        return SearchState(
+          status: SearchStatus.success,
+          query: 'query',
+          results: all.take(Constants.pageSize).toList(),
+          resultIds: idsOf(all),
+          hasMore: true,
+        );
+      },
+      act: (bloc) async {
+        bloc.add(LoadMoreSearchResults());
+        await bloc.stream.firstWhere((s) => s.isLoadingMore);
+        bloc.add(SearchQueryChanged(query: 'next'));
+      },
+      // The new search's success replaces results anyway, so check every
+      // emitted state for the stale page, not just the final one
+      expect: () => everyElement(
+        predicate<SearchState>(
+          (s) => s.results.every((n) => n.id != 'stale'),
+          'has no stale results',
+        ),
+      ),
+      verify: (bloc) {
+        expect(bloc.state.query, 'next');
+      },
+    );
+  });
+
   // ── LoadMoreSearchResults – empty batch ──────────────────────────────────
 
   group('LoadMoreSearchResults – empty batch', () {
     blocTest<SearchBloc, SearchState>(
-      'sets hasMore=false when newBatch is empty despite hasMore being true',
+      'sets hasMore=false without loading when no ids remain',
       build: buildBloc,
       seed: () {
         final all = buildNoteList(Constants.pageSize);
@@ -638,19 +783,21 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all,
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: true,
         );
       },
       act: (bloc) => bloc.add(LoadMoreSearchResults()),
       expect: () => [
-        stateMatching(isLoadingMore: true),
         stateMatching(
           isLoadingMore: false,
           hasMore: false,
           resultsLength: Constants.pageSize,
         ),
       ],
+      verify: (_) {
+        verifyNever(() => mockRepo.getNotesMetaData(any()));
+      },
     );
   });
 
@@ -671,7 +818,7 @@ void main() {
         status: SearchStatus.success,
         query: 'query',
         results: buildNoteList(3),
-        allFilteredNotes: buildNoteList(3),
+        resultIds: idsOf(buildNoteList(3)),
         hasMore: false,
       ),
       act: (bloc) => bloc.add(LoadMoreSearchResults()),
@@ -685,7 +832,7 @@ void main() {
         status: SearchStatus.success,
         query: 'query',
         results: buildNoteList(Constants.pageSize + 5),
-        allFilteredNotes: buildNoteList(Constants.pageSize + 5),
+        resultIds: idsOf(buildNoteList(Constants.pageSize + 5)),
         hasMore: true,
         isLoadingMore: true,
       ),
@@ -702,7 +849,7 @@ void main() {
           status: SearchStatus.success,
           query: 'query',
           results: all,
-          allFilteredNotes: all,
+          resultIds: idsOf(all),
           hasMore: false,
         );
       },
@@ -721,7 +868,7 @@ void main() {
         status: SearchStatus.success,
         query: 'test',
         results: buildNoteList(5),
-        allFilteredNotes: buildNoteList(5),
+        resultIds: idsOf(buildNoteList(5)),
         hasMore: true,
         currentPage: 1,
       ),
@@ -754,7 +901,7 @@ void main() {
         status: SearchStatus.success,
         query: 'query',
         results: buildNoteList(25),
-        allFilteredNotes: buildNoteList(25),
+        resultIds: idsOf(buildNoteList(25)),
         hasMore: true,
         isLoadingMore: true,
       ),
@@ -783,7 +930,9 @@ void main() {
       'search → load more → clear returns to initial',
       build: () {
         final all = buildNoteList(Constants.pageSize + 2);
-        when(() => mockRepo.searchNotes('flow')).thenAnswer((_) async => all);
+        when(
+          () => mockRepo.searchNoteIds('flow'),
+        ).thenAnswer((_) async => idsOf(all));
         return buildBloc();
       },
       act: (bloc) async {
@@ -804,8 +953,8 @@ void main() {
       'search → clear → empty query keeps initial state',
       build: () {
         when(
-          () => mockRepo.searchNotes('abc'),
-        ).thenAnswer((_) async => buildNoteList(1));
+          () => mockRepo.searchNoteIds('abc'),
+        ).thenAnswer((_) async => idsOf(buildNoteList(1)));
         return buildBloc();
       },
       act: (bloc) async {
@@ -831,7 +980,7 @@ void main() {
       const state = SearchState();
       expect(state.status, SearchStatus.initial);
       expect(state.results, isEmpty);
-      expect(state.allFilteredNotes, isEmpty);
+      expect(state.resultIds, isEmpty);
       expect(state.query, isEmpty);
       expect(state.hasMore, isFalse);
       expect(state.currentPage, 0);
@@ -852,9 +1001,7 @@ void main() {
         SearchStatus.loading,
       );
       expect(original.copyWith(results: [note]).results, [note]);
-      expect(original.copyWith(allFilteredNotes: [note]).allFilteredNotes, [
-        note,
-      ]);
+      expect(original.copyWith(resultIds: [note.id]).resultIds, [note.id]);
       expect(original.copyWith(query: 'query').query, 'query');
       expect(original.copyWith(hasMore: true).hasMore, isTrue);
       expect(original.copyWith(currentPage: 2).currentPage, 2);
@@ -892,9 +1039,9 @@ void main() {
       expect(a, isNot(equals(b)));
     });
 
-    test('states differ when allFilteredNotes differ', () {
-      final a = SearchState(allFilteredNotes: [makeNote(id: '1')]);
-      final b = SearchState(allFilteredNotes: [makeNote(id: '2')]);
+    test('states differ when resultIds differ', () {
+      const a = SearchState(resultIds: ['1']);
+      const b = SearchState(resultIds: ['2']);
       expect(a, isNot(equals(b)));
     });
 
@@ -927,7 +1074,7 @@ void main() {
       final state = SearchState(
         status: SearchStatus.success,
         results: [note],
-        allFilteredNotes: [note],
+        resultIds: idsOf([note]),
         query: 'query',
         hasMore: true,
         currentPage: 1,

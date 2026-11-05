@@ -14,7 +14,10 @@ MarkdownEditorThemeData markdownEditorTheme(BuildContext context) {
   final bodyMedium = textTheme.bodyMedium ?? const TextStyle();
 
   final codeTextStyle =
-      context.textTheme.titleSmall?.copyWith(color: colorScheme.onSurface) ??
+      context.textTheme.titleSmall?.copyWith(
+        color: colorScheme.onSurface,
+        fontFamily: MechanixFontFamily.geistMono,
+      ) ??
       const TextStyle();
 
   return MarkdownEditorThemeData(
@@ -22,10 +25,11 @@ MarkdownEditorThemeData markdownEditorTheme(BuildContext context) {
     textColor: colorScheme.onSurface,
     mutedTextColor: colorScheme.onSurfaceVariant,
     accentColor: colorScheme.primary,
-    selectionColor: colorScheme.primary.withValues(alpha: 0.16),
+    selectionColor: colorScheme.primary.withValues(alpha: 0.25),
     caretColor: colorScheme.primary,
     highlightColor: colorScheme.primary.withValues(alpha: 0.15),
     codeBackgroundColor: colorScheme.surfaceContainer,
+    fencedCodeBackgroundColor: colorScheme.surfaceContainer,
     quoteBorderColor: colorScheme.outlineVariant,
     taskBorderColor: colorScheme.onSurfaceVariant,
     taskCheckedColor: colorScheme.primary,
@@ -39,7 +43,15 @@ MarkdownEditorThemeData markdownEditorTheme(BuildContext context) {
       titleSmall.copyWith(color: colorScheme.onSurface), // H5
       bodyMedium.copyWith(color: colorScheme.onSurface), // H6
     ],
-    contentPadding: const EdgeInsets.all(24),
+    headingBlockPadding: const [
+      EdgeInsets.only(top: 24, bottom: 24), // H1 block padding
+      EdgeInsets.only(top: 24, bottom: 24), // H2 block padding
+      EdgeInsets.zero, // H3
+      EdgeInsets.zero, // H4
+      EdgeInsets.zero, // H5
+      EdgeInsets.zero, // H6
+    ],
+    contentPadding: const EdgeInsets.symmetric(horizontal: 24),
     maxContentWidth: 4000.0,
     taskSize: 18,
   );

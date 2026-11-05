@@ -319,19 +319,19 @@ abstract class AppLocalizations {
   /// No description provided for @moveToTrash.
   ///
   /// In en, this message translates to:
-  /// **'Move to trash'**
+  /// **'Delete'**
   String get moveToTrash;
 
   /// No description provided for @moveToTrashPrompt.
   ///
   /// In en, this message translates to:
-  /// **'Do you want to move this note to trash?'**
+  /// **'Do you want to delete this note?'**
   String get moveToTrashPrompt;
 
   /// No description provided for @trash.
   ///
   /// In en, this message translates to:
-  /// **'Trash'**
+  /// **'Delete'**
   String get trash;
 
   /// No description provided for @searchNote.

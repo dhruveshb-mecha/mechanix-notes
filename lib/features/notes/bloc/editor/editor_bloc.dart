@@ -109,19 +109,6 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
       final plainText = (event.plainText ?? markdownToPlainText(markdown))
           .trim();
 
-      final isEmpty = current.title.trim().isEmpty && plainText.isEmpty;
-
-      if (isEmpty) {
-        if (current.isNewNote) {
-          AppLogger.i('EditorBloc: Discarding empty new note');
-          emit(const EditorDiscarded());
-        } else {
-          AppLogger.i('EditorBloc: Deleting existing note because it is empty');
-          emit(EditorDeleteRequest(current.noteId));
-        }
-        return;
-      }
-
       NoteModel? existing;
       if (current.lastSavedContent.isEmpty) {
         existing = await _repository.getNoteById(current.noteId);
@@ -133,6 +120,19 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
         plainText: plainText,
         existing: existing,
       );
+
+      final isEmpty = note.title.trim().isEmpty && plainText.isEmpty;
+
+      if (isEmpty) {
+        if (current.isNewNote) {
+          AppLogger.i('EditorBloc: Discarding empty new note');
+          emit(const EditorDiscarded());
+        } else {
+          AppLogger.i('EditorBloc: Deleting existing note because it is empty');
+          emit(EditorDeleteRequest(current.noteId));
+        }
+        return;
+      }
 
       // Check if content is unchanged using in-memory baseline
       if (!current.isNewNote) {
@@ -147,7 +147,8 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
             : current.lastSavedIsPinned;
 
         final isContentUnchanged = lastSavedContent == markdown;
-        final isTitleUnchanged = lastSavedTitle == note.title;
+        final isTitleUnchanged = lastSavedTitle == note.title ||
+            (isContentUnchanged && lastSavedTitle == current.title);
         final isPinUnchanged = lastSavedIsPinned == note.isPinned;
 
         if (isContentUnchanged && isTitleUnchanged && isPinUnchanged) {
@@ -176,11 +177,45 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
 
   (String title, String previewText) _extractTitleAndPreview(
     String currentTitle,
-    String plainText,
-  ) {
+    String plainText, {
+    String? content,
+  }) {
     final trimmed = plainText.trim();
     if (trimmed.isEmpty) {
-      return (currentTitle, '');
+      final hasNoContent =
+          content == null || content.trim().isEmpty || content.trim() == '#';
+      return (hasNoContent && currentTitle.isEmpty ? '' : currentTitle, '');
+    }
+
+    if (content != null && content.isNotEmpty) {
+      final trimmedContent = content.trimLeft();
+      final firstContentLine = trimmedContent.split('\n').first.trim();
+      final isH1 =
+          firstContentLine.startsWith('#') && !firstContentLine.startsWith('##');
+
+      if (isH1) {
+        final headingTitle =
+            firstContentLine.replaceFirst(RegExp(r'^#\s*'), '').trim();
+        final bodyLines = trimmedContent.split('\n').skip(1).join('\n');
+        final bodyPlain = markdownToPlainText(bodyLines).trim();
+        final preview = bodyPlain.length > Constants.notePreviewTextMaxLength
+            ? bodyPlain.substring(0, Constants.notePreviewTextMaxLength)
+            : bodyPlain;
+        return (headingTitle, preview);
+      }
+
+      final isListOrBlock = firstContentLine.startsWith('- ') ||
+          firstContentLine.startsWith('* ') ||
+          firstContentLine.startsWith('+ ') ||
+          firstContentLine.startsWith('> ') ||
+          firstContentLine.startsWith('```') ||
+          RegExp(r'^\d+[.)]\s+').hasMatch(firstContentLine);
+      if (isListOrBlock) {
+        final preview = trimmed.length > Constants.notePreviewTextMaxLength
+            ? trimmed.substring(0, Constants.notePreviewTextMaxLength)
+            : trimmed;
+        return ('', preview);
+      }
     }
 
     final lines = plainText
@@ -224,6 +259,7 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
     final (title, previewText) = _extractTitleAndPreview(
       current.title,
       plainText,
+      content: content,
     );
 
     return NoteModel(
@@ -276,7 +312,8 @@ class EditorBloc extends Bloc<EditorEvent, EditorState> {
             : current.lastSavedIsPinned;
 
         final isContentUnchanged = lastSavedContent == markdown;
-        final isTitleUnchanged = lastSavedTitle == note.title;
+        final isTitleUnchanged = lastSavedTitle == note.title ||
+            (isContentUnchanged && lastSavedTitle == current.title);
         final isPinUnchanged = lastSavedIsPinned == note.isPinned;
 
         if (isContentUnchanged && isTitleUnchanged && isPinUnchanged) {

@@ -31,11 +31,11 @@ void main() {
       );
     });
 
-    test('falls back to notes when title is empty or only special characters', () {
-      expect(NoteFileStorage.sanitizeFileName(''), 'notes');
-      expect(NoteFileStorage.sanitizeFileName('    '), 'notes');
-      expect(NoteFileStorage.sanitizeFileName('###'), 'notes');
-      expect(NoteFileStorage.sanitizeFileName('...'), 'notes');
+    test('falls back to untitled when title is empty or only special characters', () {
+      expect(NoteFileStorage.sanitizeFileName(''), 'untitled');
+      expect(NoteFileStorage.sanitizeFileName('    '), 'untitled');
+      expect(NoteFileStorage.sanitizeFileName('###'), 'untitled');
+      expect(NoteFileStorage.sanitizeFileName('...'), 'untitled');
     });
 
     test('clamps long title to 100 characters', () {
@@ -51,28 +51,28 @@ void main() {
       expect(filename, 'Grocery List.md');
     });
 
-    test('resolves empty title to notes.md', () async {
+    test('resolves empty title to untitled.md', () async {
       final filename = await storage.resolveFileName(title: '');
-      expect(filename, 'notes.md');
+      expect(filename, 'untitled.md');
     });
 
     test('increments counter when collision exists with different note', () async {
-      File(p.join(tempDir.path, 'notes.md')).writeAsStringSync('existing');
+      File(p.join(tempDir.path, 'untitled.md')).writeAsStringSync('existing');
       final firstCollision = await storage.resolveFileName(title: '');
-      expect(firstCollision, 'notes (1).md');
+      expect(firstCollision, 'untitled (1).md');
 
-      File(p.join(tempDir.path, 'notes (1).md')).writeAsStringSync('existing 2');
+      File(p.join(tempDir.path, 'untitled (1).md')).writeAsStringSync('existing 2');
       final secondCollision = await storage.resolveFileName(title: '');
-      expect(secondCollision, 'notes (2).md');
+      expect(secondCollision, 'untitled (2).md');
     });
 
     test('retains currentFileName when title has not changed', () async {
-      File(p.join(tempDir.path, 'notes (1).md')).writeAsStringSync('mine');
+      File(p.join(tempDir.path, 'untitled (1).md')).writeAsStringSync('mine');
       final result = await storage.resolveFileName(
         title: '',
-        currentFileName: 'notes (1).md',
+        currentFileName: 'untitled (1).md',
       );
-      expect(result, 'notes (1).md');
+      expect(result, 'untitled (1).md');
     });
   });
 

@@ -1,31 +1,30 @@
 import 'package:equatable/equatable.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
+import 'package:mechanix_notes/features/notes/data/models/time_group.dart';
 import 'package:mechanix_notes/core/utils/enums.dart';
 
 class NotesState extends Equatable {
+  /// All notes, pinned first and then most recently updated.
   final List<NoteMetaData> notes;
+
+  /// [notes] flattened with [TimeGroup] headers, in display order.
   final List<Object> groupedNotes;
+
+  /// Number of notes under each header in [groupedNotes].
+  final Map<TimeGroup, int> groupCounts;
   final bool isLoading;
-  final bool isLoadingMore;
-  final bool hasMore;
-  final int currentPage;
   final ErrorCategory? error;
   final String localized;
-  final bool isRefreshed;
   final bool isSelectionMode;
   final List<String> selectedNotes;
-
 
   const NotesState({
     this.notes = const [],
     this.groupedNotes = const [],
-    this.isLoading = false,
-    this.isLoadingMore = false,
-    this.hasMore = true,
-    this.currentPage = 0,
+    this.groupCounts = const {},
+    this.isLoading = true,
     this.error,
     this.localized = 'en',
-    this.isRefreshed = false,
     this.isSelectionMode = false,
     this.selectedNotes = const [],
   });
@@ -33,26 +32,20 @@ class NotesState extends Equatable {
   NotesState copyWith({
     List<NoteMetaData>? notes,
     List<Object>? groupedNotes,
+    Map<TimeGroup, int>? groupCounts,
     bool? isLoading,
-    bool? isLoadingMore,
-    bool? hasMore,
-    int? currentPage,
     ErrorCategory? error,
     String? localized,
-    bool? isRefreshed,
     bool? isSelectionMode,
     List<String>? selectedNotes,
   }) {
     return NotesState(
       notes: notes ?? this.notes,
       groupedNotes: groupedNotes ?? this.groupedNotes,
+      groupCounts: groupCounts ?? this.groupCounts,
       isLoading: isLoading ?? this.isLoading,
-      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-      hasMore: hasMore ?? this.hasMore,
-      currentPage: currentPage ?? this.currentPage,
       error: error,
       localized: localized ?? this.localized,
-      isRefreshed: isRefreshed ?? false,
       isSelectionMode: isSelectionMode ?? this.isSelectionMode,
       selectedNotes: selectedNotes ?? this.selectedNotes,
     );
@@ -62,13 +55,10 @@ class NotesState extends Equatable {
   List<Object?> get props => [
     notes,
     groupedNotes,
+    groupCounts,
     isLoading,
-    isLoadingMore,
-    hasMore,
-    currentPage,
     error,
     localized,
-    isRefreshed,
     isSelectionMode,
     selectedNotes,
   ];

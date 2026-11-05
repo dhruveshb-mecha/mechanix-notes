@@ -152,13 +152,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get unpinNote => 'Unpin note';
 
   @override
-  String get moveToTrash => 'Move to trash';
+  String get moveToTrash => 'Delete';
 
   @override
-  String get moveToTrashPrompt => 'Do you want to move this note to trash?';
+  String get moveToTrashPrompt => 'Do you want to delete this note?';
 
   @override
-  String get trash => 'Trash';
+  String get trash => 'Delete';
 
   @override
   String get searchNote => 'Search note';

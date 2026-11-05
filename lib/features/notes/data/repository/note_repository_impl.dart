@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:mechanix_notes/core/exceptions/objectbox_exception.dart';
 import 'package:mechanix_notes/core/utils/app_logger.dart';
 import 'package:mechanix_notes/core/utils/constants.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
@@ -9,18 +10,22 @@ import 'package:mechanix_notes/features/notes/data/repository/note_repository.da
 import 'package:mechanix_notes/features/notes/data/services/indexing_service.dart';
 import 'package:mechanix_notes/features/notes/data/services/note_file_storage.dart';
 import 'package:mechanix_notes/features/notes/data/services/note_tag_helper.dart';
-import 'package:mechanix_notes/objectbox.g.dart';
+import 'package:mechanix_notes/objectbox.g.dart' hide ObjectBoxException;
 
 class NoteRepositoryImpl extends NoteRepository {
+  static Store? _sharedStore;
+
   Store? _store;
   Box<NoteModel>? _box;
   final IndexingService _indexingService;
   final NoteFileStorage _fileStorage;
 
   NoteRepositoryImpl({
+    Store? store,
     IndexingService? indexingService,
     NoteFileStorage? fileStorage,
-  }) : _indexingService = indexingService ?? IndexingService(),
+  }) : _store = store,
+       _indexingService = indexingService ?? IndexingService(),
        _fileStorage = fileStorage ?? NoteFileStorage();
 
   Box<NoteModel> get box {
@@ -34,6 +39,12 @@ class NoteRepositoryImpl extends NoteRepository {
 
   Future<void> ensureStoreConnected() async {
     if (_store != null && !_store!.isClosed()) return;
+
+    if (_sharedStore != null && !_sharedStore!.isClosed()) {
+      _store = _sharedStore;
+      _box = _store!.box<NoteModel>();
+      return;
+    }
 
     try {
       await _initializeStore();
@@ -68,10 +79,16 @@ class NoteRepositoryImpl extends NoteRepository {
         await appDir.create(recursive: true);
       }
 
-      _store = await openStore(
-        maxDBSizeInKB: Constants.maxDBSizeInKB,
-        directory: appDir.path,
-      );
+      if (_sharedStore != null && !_sharedStore!.isClosed()) {
+        _store = _sharedStore;
+      } else {
+        _sharedStore = await openStore(
+          maxDBSizeInKB: Constants.maxDBSizeInKB,
+          directory: appDir.path,
+        );
+        _store = _sharedStore;
+      }
+
       _box = _store!.box<NoteModel>();
 
       AppLogger.i('[NoteRepository] ObjectBox store opened at ${appDir.path}');
@@ -81,70 +98,28 @@ class NoteRepositoryImpl extends NoteRepository {
     }
   }
 
-  @override
-  Future<List<NoteMetaData>> getNotes(int skip, int take) async {
-    try {
-      await ensureStoreConnected();
-      final queryBuilder = box.query()
-        ..order(NoteModel_.isPinned, flags: Order.descending)
-        ..order(NoteModel_.updatedAt, flags: Order.descending);
-      final query = queryBuilder.build();
-      query.offset = skip;
-      query.limit = take;
-
-      final notes = query.find();
-      query.close();
-
-      if (notes.isEmpty) {
-        AppLogger.i("No notes found");
-        return [];
-      }
-
-      final metaDataList = notes.map((note) {
-        return NoteMetaData(
-          id: note.id,
-          height: note.height,
-          title: note.title,
-          createdAt: note.createdAt,
-          updatedAt: note.updatedAt,
-          previewText: note.previewText,
-          isPinned: note.isPinned,
-        );
-      }).toList();
-
-      AppLogger.i(
-        "Fetched notes page (skip: $skip, take: $take) → page size: ${metaDataList.length}",
-      );
-      return metaDataList;
-    } catch (e) {
-      AppLogger.e('Failed to fetch notes: $e');
-      return [];
-    }
-  }
+  static NoteMetaData _toMetaData(NoteModel note) => NoteMetaData(
+    id: note.id,
+    height: note.height,
+    title: note.title,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+    previewText: note.previewText,
+    isPinned: note.isPinned,
+  );
 
   @override
-  Future<NoteMetaData?> getNoteMetaData(String id) async {
-    try {
-      await ensureStoreConnected();
-      final query = box.query(NoteModel_.id.equals(id)).build();
-      final note = query.findFirst();
-      query.close();
-      if (note != null) {
-        return NoteMetaData(
-          id: note.id,
-          height: note.height,
-          title: note.title,
-          createdAt: note.createdAt,
-          updatedAt: note.updatedAt,
-          previewText: note.previewText,
-          isPinned: note.isPinned,
-        );
-      }
-      return null;
-    } catch (e) {
-      AppLogger.e('Failed to fetch note metadata by id: $e');
-      return null;
-    }
+  Stream<List<NoteMetaData>> watchNotes() async* {
+    await ensureStoreConnected();
+    final queryBuilder = box.query()
+      ..order(NoteModel_.isPinned, flags: Order.descending)
+      ..order(NoteModel_.updatedAt, flags: Order.descending);
+    yield* queryBuilder
+        .watch(triggerImmediately: true)
+        .asyncMap((query) async {
+          final notes = await query.findAsync();
+          return notes.map(_toMetaData).toList();
+        });
   }
 
   @override
@@ -321,13 +296,17 @@ class NoteRepositoryImpl extends NoteRepository {
         currentFileName: currentFileName,
       );
 
-      // Store fileName in ObjectBox and keep content empty in database
+      // Store fileName in ObjectBox; content and plain text live only in the
+      // .md file and the search index, so keep them out of the database
+      final plainText = note.plainText;
       note.fileName = savedFileName;
       note.content = '';
+      note.plainText = '';
       box.put(note);
 
-      // Restore clean markdown in in-memory note instance
+      // Restore clean markdown and plain text in in-memory note instance
       note.content = cleanMarkdown;
+      note.plainText = plainText;
 
       await _indexingService.upsertNote(note.id, note.title, note.plainText);
       AppLogger.i(
@@ -350,41 +329,35 @@ class NoteRepositoryImpl extends NoteRepository {
   }
 
   @override
-  Future<List<NoteMetaData>> searchNotes(String query) async {
+  Future<List<String>> searchNoteIds(String query) async {
     try {
       await ensureStoreConnected();
       final ids = await _indexingService.search(query);
-      if (ids.isEmpty) return [];
-
-      final queryBuilder = box.query(NoteModel_.id.oneOf(ids));
-      final q = queryBuilder.build();
-      final dbNotes = q.find();
-      q.close();
-
-      final notesMap = {for (var note in dbNotes) note.id: note};
-      final matchingNotes = <NoteMetaData>[];
-      for (final id in ids) {
-        final note = notesMap[id];
-        if (note != null) {
-          matchingNotes.add(
-            NoteMetaData(
-              id: note.id,
-              height: note.height,
-              title: note.title,
-              createdAt: note.createdAt,
-              updatedAt: note.updatedAt,
-              previewText: note.previewText,
-              isPinned: note.isPinned,
-            ),
-          );
-        }
-      }
-      AppLogger.i(
-        "Found ${matchingNotes.length} matching notes via IndexingService",
-      );
-      return matchingNotes;
+      AppLogger.i("Found ${ids.length} matching note ids via IndexingService");
+      return ids;
     } catch (e) {
       AppLogger.e('Failed to search notes: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<List<NoteMetaData>> getNotesMetaData(List<String> ids) async {
+    if (ids.isEmpty) return [];
+    try {
+      await ensureStoreConnected();
+      final q = box.query(NoteModel_.id.oneOf(ids)).build();
+      final dbNotes = await q.findAsync();
+      q.close();
+
+      // Restore the caller's order (search relevance); oneOf does not keep it
+      final notesMap = {for (var note in dbNotes) note.id: note};
+      return [
+        for (final id in ids)
+          if (notesMap[id] case final note?) _toMetaData(note),
+      ];
+    } catch (e) {
+      AppLogger.e('Failed to load notes metadata: $e');
       return [];
     }
   }
@@ -408,5 +381,15 @@ class NoteRepositoryImpl extends NoteRepository {
       AppLogger.e('NoteRepository: togglePinNote failed: $e');
       return false;
     }
+  }
+
+  @override
+  Future<void> close() async {
+    if (_sharedStore != null && !_sharedStore!.isClosed()) {
+      _sharedStore!.close();
+      _sharedStore = null;
+    }
+    _store = null;
+    _box = null;
   }
 }

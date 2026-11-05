@@ -6,7 +6,10 @@ enum SearchStatus { initial, loading, success, failure }
 class SearchState extends Equatable {
   final SearchStatus status;
   final List<NoteMetaData> results;
-  final List<NoteMetaData> allFilteredNotes;
+
+  /// Ids of every note matching [query], most relevant first. Only the pages
+  /// up to [currentPage] are loaded into [results].
+  final List<String> resultIds;
   final String query;
   final bool hasMore;
   final int currentPage;
@@ -15,7 +18,7 @@ class SearchState extends Equatable {
   const SearchState({
     this.status = SearchStatus.initial,
     this.results = const [],
-    this.allFilteredNotes = const [],
+    this.resultIds = const [],
     this.query = '',
     this.hasMore = false,
     this.currentPage = 0,
@@ -25,7 +28,7 @@ class SearchState extends Equatable {
   SearchState copyWith({
     SearchStatus? status,
     List<NoteMetaData>? results,
-    List<NoteMetaData>? allFilteredNotes,
+    List<String>? resultIds,
     String? query,
     bool? hasMore,
     int? currentPage,
@@ -34,7 +37,7 @@ class SearchState extends Equatable {
     return SearchState(
       status: status ?? this.status,
       results: results ?? this.results,
-      allFilteredNotes: allFilteredNotes ?? this.allFilteredNotes,
+      resultIds: resultIds ?? this.resultIds,
       query: query ?? this.query,
       hasMore: hasMore ?? this.hasMore,
       currentPage: currentPage ?? this.currentPage,
@@ -46,7 +49,7 @@ class SearchState extends Equatable {
   List<Object?> get props => [
     status,
     results,
-    allFilteredNotes,
+    resultIds,
     query,
     hasMore,
     currentPage,

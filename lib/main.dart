@@ -21,7 +21,10 @@ void main(List<String> args) {
   runApp(
     MultiRepositoryProvider(
       providers: [
-        RepositoryProvider<NoteRepository>(create: (_) => NoteRepositoryImpl()),
+        RepositoryProvider<NoteRepository>(
+          create: (_) => NoteRepositoryImpl(),
+          dispose: (repository) => repository.close(),
+        ),
       ],
       child: MultiBlocProvider(
         providers: [

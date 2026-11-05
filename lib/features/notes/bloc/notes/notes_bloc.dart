@@ -1,8 +1,8 @@
+import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 import 'package:mechanix_notes/core/exceptions/objectbox_exception.dart';
 import 'package:mechanix_notes/core/utils/app_logger.dart';
-import 'package:mechanix_notes/core/utils/constants.dart';
 import 'package:mechanix_notes/core/utils/enums.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_event.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_state.dart';
@@ -17,9 +17,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
   NotesBloc({required this.noteRepository, DateTime Function()? clock})
     : clock = clock ?? DateTime.now,
       super(const NotesState()) {
-    on<LoadNotes>(_loadNotes);
-    on<LoadMoreNotes>(_loadMoreNotes);
-    on<RefreshNote>(_refreshNote);
+    on<LoadNotes>(_loadNotes, transformer: restartable());
     on<DeleteNotes>(_deleteNotes);
     on<ToggleSelectionMode>(_toggleSelectionMode);
     on<ToggleNoteSelection>(_toggleNoteSelection);
@@ -31,186 +29,66 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
   }
 
   Future<void> _loadNotes(LoadNotes event, Emitter<NotesState> emit) async {
-    emit(state.copyWith(isLoading: true, error: null));
-    AppLogger.i("Loading notes");
+    emit(state.copyWith(isLoading: true));
 
-    try {
-      final firstPage = await noteRepository.getNotes(0, Constants.pageSize);
-      final flattened = _buildFlattenedNotes(firstPage);
-      final hasMore = firstPage.length == Constants.pageSize;
-      AppLogger.i(
-        "Notes loaded — showing ${firstPage.length}, hasMore: $hasMore",
-      );
-      emit(
-        state.copyWith(
-          notes: firstPage,
-          groupedNotes: flattened,
+    await emit.forEach<List<NoteMetaData>>(
+      noteRepository.watchNotes(),
+      onData: (notes) {
+        final (groupedNotes, groupCounts) = _buildFlattenedNotes(notes);
+        return state.copyWith(
+          notes: notes,
+          groupedNotes: groupedNotes,
+          groupCounts: groupCounts,
           isLoading: false,
-          hasMore: hasMore,
-          currentPage: 0,
-        ),
-      );
-    } on ObjectBoxException catch (e) {
-      AppLogger.e("App already running: $e");
-      emit(
-        state.copyWith(
-          isLoading: false,
-          error: ErrorCategory.appAlreadyRunning,
-        ),
-      );
-    } catch (e) {
-      AppLogger.e("Error loading notes: $e");
-      emit(
-        state.copyWith(
-          isLoading: false,
-          error: ErrorCategory.failedToLoadNotes,
-        ),
-      );
-    }
-  }
-
-  Future<void> _loadMoreNotes(
-    LoadMoreNotes event,
-    Emitter<NotesState> emit,
-  ) async {
-    try {
-      if (state.isLoadingMore || !state.hasMore) return;
-      AppLogger.i("Loading more notes");
-      emit(state.copyWith(isLoadingMore: true));
-
-      final currentCount = state.notes.length;
-
-      final newBatch = await noteRepository.getNotes(
-        currentCount,
-        Constants.pageSize,
-      );
-
-      if (newBatch.isEmpty) {
-        emit(state.copyWith(isLoadingMore: false, hasMore: false));
-        return;
-      }
-
-      final hasPinnedInNewBatch = newBatch.any((n) => n.isPinned);
-
-      List<Object> newFlattened;
-      if (hasPinnedInNewBatch) {
-        // Safe fallback for rare case where pinned notes span across page boundaries
-        newFlattened = _buildFlattenedNotes([...state.notes, ...newBatch]);
-      } else {
-        // O(1) incremental path: find the last active chronological group
-        TimeGroup? lastGroup;
-        for (var i = state.groupedNotes.length - 1; i >= 0; i--) {
-          final item = state.groupedNotes[i];
-          if (item is TimeGroup && item.category != TimeCategory.pinned) {
-            lastGroup = item;
-            break;
-          }
-        }
-
-        final appended = _buildFlattenedNotes(
-          newBatch,
-          existingGroup: lastGroup,
+          selectedNotes: _existingSelection(notes),
         );
-        newFlattened = [...state.groupedNotes, ...appended];
-      }
-
-      emit(
-        state.copyWith(
-          notes: [...state.notes, ...newBatch],
-          groupedNotes: newFlattened,
-          isLoadingMore: false,
-          hasMore: newBatch.length == Constants.pageSize,
-          currentPage: state.currentPage + 1,
-        ),
-      );
-    } catch (e) {
-      AppLogger.e("Error loading more notes: $e");
-      emit(state.copyWith(isLoadingMore: false));
-    }
+      },
+      onError: (e, _) {
+        AppLogger.e("Error loading notes: $e");
+        return state.copyWith(
+          isLoading: false,
+          error: e is ObjectBoxException
+              ? ErrorCategory.appAlreadyRunning
+              : ErrorCategory.failedToLoadNotes,
+        );
+      },
+    );
   }
 
-  List<Object> _buildFlattenedNotes(
-    List<NoteMetaData> notes, {
-    TimeGroup? existingGroup,
-  }) {
-    if (notes.isEmpty) return [];
+  /// Drops selected ids whose notes no longer exist.
+  List<String> _existingSelection(List<NoteMetaData> notes) {
+    if (state.selectedNotes.isEmpty) return state.selectedNotes;
+    final ids = notes.map((n) => n.id).toSet();
+    return state.selectedNotes.where(ids.contains).toList();
+  }
 
+  /// Returns the notes with a [TimeGroup] header before each group, and the
+  /// number of notes in each group.
+  (List<Object>, Map<TimeGroup, int>) _buildFlattenedNotes(
+    List<NoteMetaData> notes,
+  ) {
     final List<Object> flattened = [];
-    final pinnedNotes = notes.where((n) => n.isPinned).toList();
+    final Map<TimeGroup, int> counts = {};
+    final now = clock();
+    final today = DateTime(now.year, now.month, now.day);
+    final monthYear = DateFormat("MMMM yyyy", state.localized);
+    TimeGroup? currentGroup;
 
-    // 1. Pinned notes section at the top
-    if (pinnedNotes.isNotEmpty) {
-      if (existingGroup?.category != TimeCategory.pinned) {
-        flattened.add(const TimeGroup(TimeCategory.pinned));
-      }
-      flattened.addAll(pinnedNotes);
-    }
-
-    // 2. All notes (including pinned notes) grouped chronologically by time
-    final chronologicalNotes = List<NoteMetaData>.from(notes)
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-
-    TimeGroup? currentGroup = existingGroup?.category == TimeCategory.pinned
-        ? null
-        : existingGroup;
-
-    for (final note in chronologicalNotes) {
-      final group = _getTimeGroupForNote(note);
+    // Notes arrive pinned first, then by updatedAt descending, so each group
+    // is contiguous
+    for (final note in notes) {
+      final group = note.isPinned
+          ? const TimeGroup(TimeCategory.pinned)
+          : _getTimeGroupForNote(note, now, today, monthYear);
       if (group != currentGroup) {
         flattened.add(group);
         currentGroup = group;
       }
       flattened.add(note);
+      counts[group] = (counts[group] ?? 0) + 1;
     }
 
-    return flattened;
-  }
-
-  /// Reloads the edited note
-  Future<void> _refreshNote(RefreshNote event, Emitter<NotesState> emit) async {
-    try {
-      AppLogger.i("Refreshing note ${event.noteId}");
-      final updatedNote = await noteRepository.getNoteMetaData(event.noteId);
-      if (updatedNote == null) return;
-      final group = _getTimeGroupForNote(updatedNote);
-
-      if (!updatedNote.isPinned && group.category != TimeCategory.recent) {
-        return;
-      }
-      emit(state.copyWith(isRefreshed: false));
-
-      // Remove old entry and insert updated note
-      final updatedNotes = [
-        updatedNote,
-        ...state.notes.where((n) => n.id != event.noteId),
-      ];
-
-      updatedNotes.sort((a, b) {
-        if (a.isPinned != b.isPinned) {
-          return a.isPinned ? -1 : 1;
-        }
-        return b.updatedAt.compareTo(a.updatedAt);
-      });
-
-      // Reset pagination to first page only
-      final firstPage = updatedNotes.take(Constants.pageSize).toList();
-      final flattened = _buildFlattenedNotes(firstPage);
-      final hasMore = updatedNotes.length > Constants.pageSize;
-
-      AppLogger.i("Refreshing note completed ");
-
-      emit(
-        state.copyWith(
-          notes: updatedNotes,
-          groupedNotes: flattened,
-          hasMore: hasMore,
-          currentPage: 0,
-          isRefreshed: true,
-        ),
-      );
-    } catch (e) {
-      AppLogger.e("Error refreshing note: $e");
-    }
+    return (flattened, counts);
   }
 
   Future<void> _togglePinNote(
@@ -218,9 +96,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     Emitter<NotesState> emit,
   ) async {
     try {
-      emit(state.copyWith(isRefreshed: false));
       await noteRepository.togglePinNote(event.noteId);
-      add(LoadNotes());
     } catch (e) {
       AppLogger.e("Error toggling pin note: $e");
     }
@@ -228,38 +104,13 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
 
   Future<void> _deleteNotes(DeleteNotes event, Emitter<NotesState> emit) async {
     try {
-      emit(state.copyWith(isRefreshed: false));
+      final ids = event.noteIds ?? List<String>.from(state.selectedNotes);
+      if (ids.isEmpty) return;
 
-      final selectedNotes = state.isSelectionMode
-          ? List<String>.from(state.selectedNotes)
-          : event.noteIds ?? [];
+      AppLogger.i("Deleting ${ids.length} notes");
+      await noteRepository.deleteNotes(ids);
 
-      AppLogger.i("Deleting notes: total notes ${state.notes.length}");
-
-      if (selectedNotes.isEmpty) return;
-
-      await noteRepository.deleteNotes(selectedNotes);
-      final updatedNotes = state.notes
-          .where((n) => !selectedNotes.contains(n.id))
-          .toList();
-
-      final firstPage = updatedNotes.take(Constants.pageSize).toList();
-      final flattened = _buildFlattenedNotes(firstPage);
-      final hasMore = updatedNotes.length > Constants.pageSize;
-
-      AppLogger.i("Notes deleted — ${updatedNotes.length} notes remaining");
-
-      emit(
-        state.copyWith(
-          notes: updatedNotes,
-          groupedNotes: flattened,
-          hasMore: hasMore,
-          currentPage: 0,
-          selectedNotes: const [],
-          isSelectionMode: false,
-          isRefreshed: true,
-        ),
-      );
+      emit(state.copyWith(selectedNotes: const [], isSelectionMode: false));
     } catch (e) {
       AppLogger.e("Error deleting notes: $e");
       emit(state.copyWith(error: ErrorCategory.failedToDeleteNotes));
@@ -297,16 +148,11 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
   }
 
   void _selectAllNotes(SelectAllNotes event, Emitter<NotesState> emit) {
-    final paginatedNoteIds = state.groupedNotes
-        .whereType<NoteMetaData>()
-        .map((n) => n.id)
-        .toList();
-    if (state.selectedNotes.length == paginatedNoteIds.length) {
+    final allNoteIds = state.notes.map((n) => n.id).toList();
+    if (state.selectedNotes.length == allNoteIds.length) {
       emit(state.copyWith(selectedNotes: const [], isSelectionMode: false));
     } else {
-      emit(
-        state.copyWith(selectedNotes: paginatedNoteIds, isSelectionMode: true),
-      );
+      emit(state.copyWith(selectedNotes: allNoteIds, isSelectionMode: true));
     }
   }
 
@@ -314,28 +160,24 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     emit(state.copyWith(selectedNotes: const [], isSelectionMode: false));
   }
 
-  TimeGroup _getTimeGroupForNote(NoteMetaData note) {
-    final now = clock();
+  TimeGroup _getTimeGroupForNote(
+    NoteMetaData note,
+    DateTime now,
+    DateTime today,
+    DateFormat monthYear,
+  ) {
     final updated = note.updatedAt;
-    final today = DateTime(now.year, now.month, now.day);
     final dateOnly = DateTime(updated.year, updated.month, updated.day);
     final daysAgo = today.difference(dateOnly).inDays;
     final hoursAgo = now.difference(updated).inHours;
 
-    final group = switch (true) {
+    return switch (true) {
       _ when hoursAgo < 2 => const TimeGroup(TimeCategory.recent),
       _ when daysAgo == 0 => const TimeGroup(TimeCategory.today),
+      _ when daysAgo == 1 => const TimeGroup(TimeCategory.yesterday),
       _ when daysAgo <= 7 => const TimeGroup(TimeCategory.last7Days),
       _ when daysAgo <= 30 => const TimeGroup(TimeCategory.lastMonth),
-      _ => TimeGroup(
-        TimeCategory.custom,
-        DateFormat("MMMM yyyy", state.localized).format(updated),
-      ),
+      _ => TimeGroup(TimeCategory.custom, monthYear.format(updated)),
     };
-
-    AppLogger.i(
-      "Time group for note ${note.id}: ${group.category} ${group.customLabel} $updated",
-    );
-    return group;
   }
 }

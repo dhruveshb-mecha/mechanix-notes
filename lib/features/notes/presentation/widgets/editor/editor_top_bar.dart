@@ -81,6 +81,7 @@ class EditorTopBar extends StatelessWidget implements PreferredSizeWidget {
               alignment: MechanixMenuAlignment.end,
               offset: const Offset(0, 4),
               width: 208,
+              style: const MenuThemeDataConfig(borderRadius: BorderRadius.zero),
               anchorBuilder: (context, controller, child) {
                 return MechanixIconButton.standard(
                   type: IconButtonType.rounded,

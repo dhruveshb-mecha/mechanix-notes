@@ -25,10 +25,13 @@ class IntegrationTestHelper {
   Future<void> tearDown() async {
     if (noteRepository != null) {
       try {
-        final notes = await noteRepository!.getNotes(0, 1000);
+        final notes = await noteRepository!.watchNotes().first;
         if (notes.isNotEmpty) {
           await noteRepository!.deleteNotes(notes.map((n) => n.id).toList());
         }
+      } catch (_) {}
+      try {
+        await noteRepository!.close();
       } catch (_) {}
     }
     if (tempDir != null && tempDir!.existsSync()) {

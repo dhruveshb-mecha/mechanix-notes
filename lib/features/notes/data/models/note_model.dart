@@ -5,7 +5,7 @@ class NoteModel {
   @Id()
   int obxId;
 
-  @Unique()
+  @Unique(onConflict: ConflictStrategy.replace)
   String id;
 
   @Index()

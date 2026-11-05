@@ -23,7 +23,10 @@ class HomeNotesView extends StatelessWidget {
           return HomeErrorView(error: state.error!);
         }
         if (state.groupedNotes.isEmpty) return const HomeEmptyView();
-        return HomeListView(groupedNotes: state.groupedNotes);
+        return HomeListView(
+          groupedNotes: state.groupedNotes,
+          groupCounts: state.groupCounts,
+        );
       },
     );
   }

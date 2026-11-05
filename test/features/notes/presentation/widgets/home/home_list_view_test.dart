@@ -9,7 +9,7 @@ import 'package:mechanix_notes/features/notes/bloc/notes/notes_event.dart';
 import 'package:mechanix_notes/features/notes/bloc/notes/notes_state.dart';
 import 'package:mechanix_notes/features/notes/data/models/note_metadata.dart';
 import 'package:mechanix_notes/features/notes/data/models/time_group.dart';
-import 'package:mechanix_notes/features/notes/presentation/widgets/home/home_delete_sheet.dart';
+import 'package:mechanix_notes/features/notes/presentation/widgets/editor/editor_trash_confirmation_sheet.dart';
 import 'package:mechanix_notes/features/notes/presentation/widgets/home/home_group_label.dart';
 import 'package:mechanix_notes/features/notes/presentation/widgets/home/home_list_view.dart';
 import 'package:mechanix_notes/features/notes/presentation/widgets/home/home_note_card.dart';
@@ -21,6 +21,20 @@ class MockNotesBloc extends MockBloc<NotesEvent, NotesState>
     implements NotesBloc {}
 
 class FakeNotesEvent extends Fake implements NotesEvent {}
+
+Map<TimeGroup, int> countNotesPerGroup(List<dynamic> groupedNotes) {
+  final counts = <TimeGroup, int>{};
+  TimeGroup? group;
+  for (final item in groupedNotes) {
+    if (item is TimeGroup) {
+      group = item;
+      counts[item] = 0;
+    } else if (group != null) {
+      counts[group] = counts[group]! + 1;
+    }
+  }
+  return counts;
+}
 
 void main() {
   late MockNotesBloc mockNotesBloc;
@@ -39,7 +53,12 @@ void main() {
       supportedLocales: AppLocalizations.supportedLocales,
       home: BlocProvider<NotesBloc>.value(
         value: mockNotesBloc,
-        child: Scaffold(body: HomeListView(groupedNotes: groupedNotes)),
+        child: Scaffold(
+          body: HomeListView(
+            groupedNotes: groupedNotes,
+            groupCounts: countNotesPerGroup(groupedNotes),
+          ),
+        ),
       ),
     );
   }
@@ -179,7 +198,7 @@ void main() {
           matching: find.byType(MechanixListTile),
         ),
       );
-      expect(noteCardTile.leading, isA<ImageIcon>());
+      expect(noteCardTile.leadingWidgets.first, isA<ImageIcon>());
       expect(noteCardTile.trailingWidgets, isEmpty);
     });
 
@@ -232,7 +251,9 @@ void main() {
       await tester.tap(find.byKey(ValueKey('pin_action_${note1.id}')));
       await tester.pumpAndSettle();
 
-      verify(() => mockNotesBloc.add(any(that: isA<TogglePinNote>()))).called(1);
+      verify(
+        () => mockNotesBloc.add(any(that: isA<TogglePinNote>())),
+      ).called(1);
 
       // Swipe open again
       await tester.drag(find.text('Daily Journal'), const Offset(-300, 0));
@@ -243,7 +264,88 @@ void main() {
       await tester.pumpAndSettle();
 
       // Verify delete bottom sheet opens
-      expect(find.byType(HomeDeleteSheet), findsOneWidget);
+      expect(find.byType(EditorTrashConfirmationSheet), findsOneWidget);
+    });
+  });
+
+  group('HomeListView item extents', () {
+    // No preview text, so the tile renders a single line
+    NoteMetaData makeNote(String id) => NoteMetaData(
+      id: id,
+      title: 'Note $id',
+      previewText: '',
+      createdAt: DateTime(2026, 9, 9),
+      updatedAt: DateTime(2026, 9, 9),
+      height: 0,
+    );
+
+    testWidgets('note card and group header render at homeTileHeight', (
+      tester,
+    ) async {
+      when(() => mockNotesBloc.state).thenReturn(const NotesState());
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: BlocProvider<NotesBloc>.value(
+            value: mockNotesBloc,
+            child: Scaffold(
+              body: Column(
+                children: [
+                  HomeNoteCard(note: makeNote('1')),
+                  const HomeGroupHeader(
+                    group: TimeGroup(TimeCategory.yesterday),
+                    count: 1,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The list hands out these heights without measuring, so they must
+      // match what the widgets actually render
+      expect(tester.getSize(find.byType(HomeNoteCard)).height, homeTileHeight);
+      expect(
+        tester.getSize(find.byType(HomeGroupHeader)).height,
+        homeTileHeight,
+      );
+    });
+
+    testWidgets('jumping to the end builds only the cards it shows', (
+      tester,
+    ) async {
+      final groupedNotes = <Object>[
+        const TimeGroup(TimeCategory.recent),
+        for (var i = 0; i < 1000; i++) makeNote('$i'),
+      ];
+      when(
+        () => mockNotesBloc.state,
+      ).thenReturn(NotesState(groupedNotes: groupedNotes));
+
+      await tester.pumpWidget(buildTestWidget(groupedNotes: groupedNotes));
+      await tester.pumpAndSettle();
+
+      var cardsBuilt = 0;
+      debugOnRebuildDirtyWidget = (element, _) {
+        if (element.widget is HomeNoteCard) cardsBuilt++;
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
+
+      // What dragging the scrollbar thumb to the bottom does
+      final position = tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+
+      expect(find.text('Note 999'), findsOneWidget);
+      expect(cardsBuilt, lessThan(40));
     });
   });
 }

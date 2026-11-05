@@ -1604,6 +1604,67 @@ void main() {
         expect(note.previewText, 'Single Line Title Only');
       },
     );
+    blocTest<EditorBloc, EditorState>(
+      'new note with empty H1 heading leaves title empty and extracts body as previewText',
+      build: buildBloc,
+      setUp: () {
+        when(() => repository.getNoteById(any())).thenAnswer((_) async => null);
+        when(() => repository.upsertNote(any())).thenAnswer((_) async {});
+      },
+      seed: () =>
+          const EditorLoaded(noteId: kTestNoteId, title: '', isNewNote: true),
+      act: (bloc) => bloc.add(
+        EditorSaveRequested(
+          content: '# \nThis is body text',
+          plainText: 'This is body text',
+        ),
+      ),
+      verify: (_) {
+        final captured = verify(
+          () => repository.upsertNote(captureAny()),
+        ).captured;
+        final note = captured.first as NoteModel;
+        expect(note.title, '');
+        expect(note.previewText, 'This is body text');
+      },
+    );
+
+    blocTest<EditorBloc, EditorState>(
+      'modifying existing note where title was removed sets title to empty string and saves note',
+      build: buildBloc,
+      setUp: () {
+        when(() => repository.getNoteById(kTestNoteId)).thenAnswer(
+          (_) async => makeNote(title: 'Old Title', content: '# Old Title\nBody'),
+        );
+        when(() => repository.upsertNote(any())).thenAnswer((_) async {});
+      },
+      seed: () => const EditorLoaded(
+        noteId: kTestNoteId,
+        title: 'Old Title',
+        lastSavedTitle: 'Old Title',
+        lastSavedContent: '# Old Title\nBody',
+        markdownContent: '# Old Title\nBody',
+        isNewNote: false,
+      ),
+      act: (bloc) => bloc.add(
+        EditorSaveRequested(
+          content: '# \nBody',
+          plainText: 'Body',
+        ),
+      ),
+      expect: () => [
+        isA<EditorLoaded>().having((s) => s.isSaving, 'isSaving', true),
+        isA<EditorSaveSuccess>(),
+      ],
+      verify: (_) {
+        final captured = verify(
+          () => repository.upsertNote(captureAny()),
+        ).captured;
+        final note = captured.first as NoteModel;
+        expect(note.title, '');
+        expect(note.previewText, 'Body');
+      },
+    );
   });
 
   group('EditorPinToggled Tests', () {

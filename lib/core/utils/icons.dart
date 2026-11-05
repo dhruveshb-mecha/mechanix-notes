@@ -30,4 +30,5 @@ class NotesIcon {
   static const String textModeIcon = 'assets/icons/textmode.png';
   static const String trashIcon = 'assets/icons/trash.png';
   static const String pinIcon = 'assets/icons/pin.png';
+  static const String paperClipIcon = 'assets/icons/paperclip.png';
 }

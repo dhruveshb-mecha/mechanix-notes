@@ -74,14 +74,10 @@ class _EditorViewState extends State<EditorView> {
           _initController(state.markdownContent);
         }
         if (state is EditorDiscarded) {
-          if (state.noteId != null) {
-            context.read<NotesBloc>().add(RefreshNote(noteId: state.noteId!));
-          }
           _canPop = true;
           Navigator.of(context).pop();
         }
         if (state is EditorSaveSuccess) {
-          context.read<NotesBloc>().add(RefreshNote(noteId: state.noteId));
           _canPop = true;
           Navigator.of(context).pop();
         }

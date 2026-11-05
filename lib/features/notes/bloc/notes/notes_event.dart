@@ -1,13 +1,8 @@
 abstract class NotesEvent {}
 
+/// Starts watching the notes in the repository. The list then stays up to
+/// date on its own whenever a note is created, edited, pinned or deleted.
 class LoadNotes extends NotesEvent {}
-
-class LoadMoreNotes extends NotesEvent {}
-
-class RefreshNote extends NotesEvent {
-  final String noteId;
-  RefreshNote({required this.noteId});
-}
 
 class DeleteNotes extends NotesEvent {
   final List<String>? noteIds;

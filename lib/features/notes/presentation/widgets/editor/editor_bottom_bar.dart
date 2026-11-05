@@ -358,23 +358,11 @@ class _EditorBottomBarState extends State<EditorBottomBar> {
       );
     }
 
-    return RepaintBoundary(
-      child: Container(
-        height: 56,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: context.colorScheme.surfaceContainer,
-
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: content,
-      ),
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: context.colorScheme.surfaceContainer),
+      child: content,
     );
   }
 }
