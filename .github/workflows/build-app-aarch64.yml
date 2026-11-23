@@ -102,6 +102,12 @@ jobs:
           echo "FLUTTER_ROOT=/opt/flutter-elinux/flutter" >> "$GITHUB_ENV"
           echo "/opt/flutter-elinux/flutter/bin" >> "$GITHUB_PATH"
 
+      # Cargokit-based plugins (flutter_tantivy) need rustup, which the Fedora image does not ship.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: aarch64-unknown-linux-gnu
+
       - name: Build notes
         run: |
           flutter-elinux pub get
