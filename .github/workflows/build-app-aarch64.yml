@@ -15,6 +15,7 @@ env:
   NFPM_VERSION: "2.47.0"
   PULP_CLI_VERSION: "0.41.1"
   MECHANIX_PACKAGER_VERSION: "v0.0.3"
+  ELINUX_ENGINE_BASE_URL: ${{ vars.CI_ELINUX_ENGINE_BASE_URL }}
   # Packages are built on every branch, but uploaded only from main and canary.
   PUBLISH: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/canary' }}
 
@@ -110,6 +111,8 @@ jobs:
 
       - name: Build notes
         run: |
+          : "${ELINUX_ENGINE_BASE_URL:?CI_ELINUX_ENGINE_BASE_URL is not set}"
+          echo "[INFO] flutter-elinux engine artifacts from $ELINUX_ENGINE_BASE_URL"
           flutter-elinux pub get
           flutter-elinux build elinux --release
 
@@ -164,7 +167,7 @@ jobs:
           WANT="$(basename "$RPM_FILE")"
           for _ in $(seq 1 40); do
             PRIMARY=$(curl -fsSL "$BASE/repodata/repomd.xml" | grep -oP 'href="\Krepodata/[^"]*primary\.xml[^"]*')
-            if curl -fsSL "$BASE/$PRIMARY" | { zcat 2>/dev/null || cat; } | grep -q "<location href=\"[^\"]*/${WANT}\""; then
+            if curl -fsSL "$BASE/$PRIMARY" | { zcat 2>/dev/null || cat; } | grep "<location href=\"[^\"]*/${WANT}\"" >/dev/null; then
               echo "[INFO] served at $BASE: $WANT"
               exit 0
             fi
@@ -229,6 +232,8 @@ jobs:
 
       - name: Build notes
         run: |
+          : "${ELINUX_ENGINE_BASE_URL:?CI_ELINUX_ENGINE_BASE_URL is not set}"
+          echo "[INFO] flutter-elinux engine artifacts from $ELINUX_ENGINE_BASE_URL"
           flutter-elinux pub get
           flutter-elinux build elinux --release
 
